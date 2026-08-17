@@ -34,3 +34,10 @@ __pycache__/
 .streamlit/
 .idea/
 .vscode/
+
+# =======================================================
+# OTHER SENSITIVE FINANCIAL & LEGAL DIRECTORIES & FLIES
+# =======================================================
+KCB_Bank_Statement.xlsx
+Tenants_Details.xlsx
+Working Download Documents/

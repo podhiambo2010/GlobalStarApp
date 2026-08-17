@@ -1,0 +1,23 @@
+﻿,Shop #,Tenant Name, Monthly Rate , Expected_Rent , Actual_Collected , Arrears_Balance ,Enforcement_Status
+0,1,"Patricia Waringa (AZINJI INFRASTUCTURE, EATHWORKS & LOGISTICS)"," 25,000.00 "," 300,000.00 "," 300,000.00 ", -   ,Compliant
+1,2,Hi-Line Motors Limited," 25,000.00 "," 300,000.00 "," 300,000.00 ", -   ,Compliant
+2,3,Mash East Africa Limited," 20,000.00 "," 240,000.00 "," 300,000.00 "," (60,000.00)",Compliant
+3,4,Barbra Lutomia," 20,000.00 "," 240,000.00 "," 210,000.00 "," 32,000.00 ",ACCESS RESTRICTION (Lock Doors / Distress)
+4,5,Dreamline Express Limited," 30,000.00 "," 360,000.00 "," 376,000.00 "," (16,000.00)",Compliant
+5,6,Greenline Royal Limited," 20,000.00 "," 240,000.00 "," 240,000.00 ", -   ,Compliant
+6,7,MC Home Decor," 20,000.00 "," 240,000.00 "," 225,000.00 "," 17,000.00 ",ACCESS RESTRICTION (Lock Doors / Distress)
+7,8,Upline Ltd," 80,000.00 "," 960,000.00 "," 960,000.00 ", -   ,Compliant
+8,9,Midtown Barbershop," 18,000.00 "," 216,000.00 "," 216,000.00 ", -   ,Compliant
+9,10,Mowlem Holdings," 31,000.00 "," 372,000.00 "," 342,000.00 "," 32,000.00 ",ACCESS RESTRICTION (Lock Doors / Distress)
+10,11,Sunculture Kenya Limited," 40,000.00 "," 480,000.00 "," 480,000.00 ", -   ,Compliant
+11,12,Pilona Bookshop," 25,000.00 "," 300,000.00 "," 300,000.00 ", -   ,Compliant
+12,13,Crown Courier," 20,000.00 "," 240,000.00 "," 180,000.00 "," 62,000.00 ",ACCESS RESTRICTION (Lock Doors / Distress)
+13,14,Legacy Barbershop," 25,000.00 "," 300,000.00 "," 240,000.00 "," 62,000.00 ",ACCESS RESTRICTION (Lock Doors / Distress)
+14,15,Linet Cemes," 25,000.00 "," 300,000.00 "," 300,005.00 ", (5.00),Compliant
+15,16,Platinum Credit (K) Limited," 64,969.00 "," 779,628.00 "," 779,628.00 ", -   ,Compliant
+16,17,Optics Centre Limited (Pitta Shuresh)," 22,000.00 "," 264,000.00 "," 264,000.00 ", -   ,Compliant
+17,18,Everlyne Achieng Otieno," 5,000.00 "," 60,000.00 "," 60,000.00 ", -   ,Compliant
+18,19,Aloice Ngolo Otieno," 10,000.00 "," 120,000.00 "," 130,000.00 "," (10,000.00)",Compliant
+19,20,Alphonce Odhiambo," 8,000.00 "," 40,000.00 "," 40,000.00 ", -   ,Compliant
+20,21,Hand in Hand," 16,722.22 "," 66,888.88 "," 117,055.40 "," (50,166.52)",Compliant
+21,22,Marin Onyango Owiti," 40,000.00 "," 200,000.00 "," 240,000.00 "," (40,000.00)",Compliant
