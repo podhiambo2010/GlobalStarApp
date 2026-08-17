@@ -12,16 +12,32 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.sidebar.markdown("## Data Upload & Portal Setup")
+st.sidebar.markdown("---")
+
+uploaded_tenant_file = st.sidebar.file_uploader("Upload Tenants Details (Excel)", type=["xlsx"])
+uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx"])
+
+tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
+bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
+
+if not os.path.exists("Tenants_Details.xlsx") and uploaded_tenant_file is None:
+    st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
+if not os.path.exists("KCB_Bank_Statement.xlsx") and uploaded_bank_file is None:
+    st.warning("⚠️ Please upload your `KCB_Bank_Statement.xlsx` file using the sidebar.")
 
 @st.cache_resource
-def get_backend():
-  return TenantPortalBackend(
-      tenant_excel_path="Tenants_Details.xlsx",
-      bank_excel_path="KCB_Bank_Statement.xlsx",
-  )
+def get_backend(t_path, b_path):
+    return TenantPortalBackend(
+        tenant_excel_path=t_path,
+        bank_excel_path=b_path,
+    )
 
-
-backend = get_backend()
+if (os.path.exists("Tenants_Details.xlsx") or uploaded_tenant_file is not None) and \
+   (os.path.exists("KCB_Bank_Statement.xlsx") or uploaded_bank_file is not None):
+    backend = get_backend(tenant_path, bank_path)
+else:
+    st.stop()
 
 st.sidebar.markdown("## Global Star Portal")
 st.sidebar.markdown("---")
