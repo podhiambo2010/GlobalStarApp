@@ -1,0 +1,36 @@
+# ==========================================
+# SENSITIVE FINANCIAL & LEGAL DIRECTORIES
+# ==========================================
+Bank_Statements/
+Invoices/
+Lease_Agreements/
+Documents/
+P_L_Reports/
+
+# ==========================================
+# SECRETS, API KEYS & CREDENTIALS
+# ==========================================
+*.txt
+*.env
+.env.*
+secrets.toml
+*.pem
+*.key
+
+# ==========================================
+# DATABASES & LOCAL STORAGE
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# PYTHON & STREAMLIT CACHE / CONFIGS
+# ==========================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.streamlit/
+.idea/
+.vscode/
