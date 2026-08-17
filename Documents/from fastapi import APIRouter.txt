@@ -1,0 +1,50 @@
+from fastapi import APIRouter 
+from src.database import get_pool
+
+router = APIRouter()
+
+
+@router.get("/summary")
+async def get_dashboard_summary():
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+    SELECT row_to_json(t) AS kpis
+    FROM (
+        SELECT
+            -- ✅ Expected (from leases)
+            COALESCE((
+                SELECT SUM(rent_amount)
+                FROM leases
+                WHERE status = 'active'
+            ), 0) AS total_expected,
+
+            -- ✅ Billed
+            COALESCE(SUM(i.total_due), 0) AS billed_this_month,
+
+            -- ✅ Collected
+            COALESCE(SUM(i.amount_paid), 0) AS total_collected,
+
+            -- ✅ Arrears
+            COALESCE(SUM(
+                CASE WHEN i.balance > 0 THEN i.balance ELSE 0 END
+            ), 0) AS arrears,
+
+            -- ✅ Collection rate
+            ROUND(
+                CASE 
+                    WHEN SUM(i.total_due) = 0 THEN 0
+                    ELSE (SUM(i.amount_paid) / SUM(i.total_due)) * 100
+                END, 2
+            ) AS collection_rate,
+
+            -- ✅ Tenants in credit
+            COUNT(DISTINCT CASE 
+                WHEN i.balance < 0 THEN i.lease_id 
+            END) AS tenants_in_credit
+
+        FROM invoices i
+        WHERE i.status != 'void'
+    ) t;
+""")

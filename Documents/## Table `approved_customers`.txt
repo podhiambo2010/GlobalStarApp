@@ -1,0 +1,1446 @@
+## Table `approved_customers`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `name` | `text` |  |
+| `phone` | `text` |  Nullable |
+| `credit_limit` | `numeric` |  Nullable |
+| `active` | `bool` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `audit_trail`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `user_id` | `uuid` |  Nullable |
+| `kiosk_id` | `uuid` |  Nullable |
+| `action` | `text` |  |
+| `table_name` | `text` |  Nullable |
+| `record_id` | `uuid` |  Nullable |
+| `details` | `jsonb` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `cash`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `date` | `date` |  |
+| `amount` | `numeric` |  |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `credit_sales`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `sku_id` | `uuid` |  |
+| `units` | `int4` |  |
+| `liters` | `numeric` |  |
+| `amount` | `numeric` |  |
+| `notes` | `text` |  Nullable |
+| `date` | `date` |  |
+| `paid` | `bool` |  |
+| `paid_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+| `customer_id` | `uuid` |  Nullable |
+
+## Table `customer_requests`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `name` | `text` |  |
+| `phone` | `text` |  Nullable |
+| `notes` | `text` |  Nullable |
+| `approved` | `bool` |  Nullable |
+| `rejected` | `bool` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `kiosks`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `name` | `text` |  |
+| `location` | `text` |  Nullable |
+| `active` | `bool` |  Nullable |
+| `owner_id` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `price_per_liter` | `numeric` |  |
+
+## Table `meter_legacy`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `date` | `date` |  |
+| `prev_reading` | `numeric` |  |
+| `curr_reading` | `numeric` |  |
+| `consumption` | `numeric` |  |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `meter_readings`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `date` | `date` |  |
+| `opening_reading` | `numeric` |  |
+| `closing_reading` | `numeric` |  |
+| `total_liters` | `numeric` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+| `opening_confirmed` | `bool` |  Nullable |
+| `opening_discrepancy_reason` | `text` |  Nullable |
+
+## Table `mpesa`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `date` | `date` |  |
+| `amount` | `numeric` |  |
+| `customer_name` | `text` |  Nullable |
+| `mpesa_receipt` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `notifications`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  Nullable |
+| `date` | `date` |  |
+| `type` | `text` |  |
+| `message` | `text` |  |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `owner_kiosks`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `int8` | Primary Identity |
+| `owner_id` | `uuid` |  Nullable |
+| `kiosk_id` | `uuid` |  Nullable |
+| `assigned_at` | `timestamptz` |  Nullable |
+
+## Table `owners`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `name` | `text` |  Nullable |
+| `phone` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `product_skus`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `name` | `text` |  |
+| `liters` | `numeric` |  |
+| `price_per_liter` | `numeric` |  |
+| `total_price` | `numeric` |  Nullable |
+| `active` | `bool` |  |
+| `created_at` | `timestamptz` |  |
+
+## Table `profiles`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `updated_at` | `timestamptz` |  Nullable |
+| `role` | `user_role` |  Nullable |
+
+## Table `reconciliation`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `kiosk_id` | `uuid` | Primary |
+| `date` | `date` | Primary |
+| `liters_sold` | `numeric` |  Nullable |
+| `cash_sales` | `numeric` |  Nullable |
+| `mpesa_sales` | `numeric` |  Nullable |
+| `cash_inflows` | `numeric` |  Nullable |
+| `mpesa_inflows` | `numeric` |  Nullable |
+| `meter_consumption` | `numeric` |  Nullable |
+| `water_variance` | `numeric` |  Nullable |
+| `cash_variance` | `numeric` |  Nullable |
+| `mpesa_variance` | `numeric` |  Nullable |
+| `status` | `text` |  Nullable |
+| `supervisor_id` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `reconciliation_sessions`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `session_date` | `date` |  |
+| `opening_reading_id` | `uuid` |  |
+| `closing_reading_id` | `uuid` |  |
+| `total_liters_pumped` | `numeric` |  Nullable |
+| `total_liters_sold` | `numeric` |  Nullable |
+| `variance_liters` | `numeric` |  Nullable |
+| `total_revenue` | `numeric` |  Nullable |
+| `expected_revenue` | `numeric` |  Nullable |
+| `variance_revenue` | `numeric` |  Nullable |
+| `sku_breakdown` | `jsonb` |  |
+| `payment_mode_breakdown` | `jsonb` |  |
+| `staff_contributions` | `jsonb` |  |
+| `status` | `text` |  |
+| `supervisor_id` | `uuid` |  Nullable |
+| `supervisor_comment` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+| `approved_at` | `timestamptz` |  Nullable |
+| `amount` | `numeric` |  Nullable |
+| `staff_id` | `uuid` |  Nullable |
+
+## Table `sales`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  |
+| `staff_id` | `uuid` |  |
+| `date` | `date` |  |
+| `sku_id` | `uuid` |  |
+| `units` | `int4` |  |
+| `liters` | `numeric` |  |
+| `amount` | `numeric` |  |
+| `payment_mode` | `text` |  |
+| `customer_name` | `text` |  Nullable |
+| `mpesa_receipt` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+
+## Table `sms_logs`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `user_id` | `uuid` |  Nullable |
+| `phone` | `text` |  |
+| `message` | `text` |  |
+| `status` | `text` |  |
+| `provider_response` | `jsonb` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `staff_performance`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  Nullable |
+| `staff_id` | `uuid` |  Nullable |
+| `month` | `date` |  |
+| `score` | `numeric` |  Nullable |
+| `rating` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `staff_sessions`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `staff_id` | `uuid` |  |
+| `kiosk_id` | `uuid` |  |
+| `session_start` | `timestamptz` |  |
+| `session_end` | `timestamptz` |  Nullable |
+| `opening_reading` | `numeric` |  Nullable |
+| `closing_reading` | `numeric` |  Nullable |
+| `notes` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `supervisor_kiosks`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `supervisor_id` | `uuid` |  |
+| `kiosk_id` | `uuid` |  |
+| `owner_id` | `uuid` |  |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `user_kiosks`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `user_id` | `uuid` |  |
+| `kiosk_id` | `uuid` |  |
+| `role_at_kiosk` | `text` |  |
+| `created_at` | `timestamptz` |  Nullable |
+
+## Table `users`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `name` | `text` |  |
+| `phone` | `text` |  Nullable Unique |
+| `role` | `user_role` |  |
+| `active` | `bool` |  Nullable |
+| `default_kiosk_id` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+| `email` | `text` |  Nullable |
+| `updated_at` | `timestamptz` |  Nullable |
+| `owner_id` | `uuid` |  Nullable |
+| `pin` | `text` |  Nullable |
+| `pin_expires_at` | `timestamptz` |  Nullable |
+
+## Table `variance_logs`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `kiosk_id` | `uuid` |  Nullable |
+| `date` | `date` |  |
+| `type` | `text` |  |
+| `description` | `text` |  Nullable |
+| `staff_id` | `uuid` |  Nullable |
+| `supervisor_id` | `uuid` |  Nullable |
+| `action_taken` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  Nullable |
+
+==========================================================================================================================================================
+
+"C:\Users\User\AppData\Local\Temp\MicrosoftEdgeDownloads\4d4a4629-38e0-4e0c-8727-b47bca144ca4\supabase-schema-lfozxkwxqdzlijhfysij.png"
+
+file:///C:/Users/User/AppData/Local/Temp/MicrosoftEdgeDownloads/08ce3d85-1982-46c4-bb97-c58f28904a1d/supabase-schema-lfozxkwxqdzlijhfysij%20(4).svg
+
+==========================================================================================================================================================
+
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.approved_customers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  name text NOT NULL,
+  phone text,
+  credit_limit numeric,
+  active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT approved_customers_pkey PRIMARY KEY (id),
+  CONSTRAINT approved_customers_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.audit_trail (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  kiosk_id uuid,
+  action text NOT NULL,
+  table_name text,
+  record_id uuid,
+  details jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT audit_trail_pkey PRIMARY KEY (id),
+  CONSTRAINT audit_trail_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT audit_trail_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.cash (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  date date NOT NULL,
+  amount numeric NOT NULL CHECK (amount >= 0::numeric),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT cash_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_cash_kiosk FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT fk_cash_staff FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.credit_sales (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  sku_id uuid NOT NULL,
+  units integer NOT NULL,
+  liters numeric NOT NULL,
+  amount numeric NOT NULL,
+  notes text,
+  date date NOT NULL,
+  paid boolean NOT NULL DEFAULT false,
+  paid_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  customer_id uuid,
+  CONSTRAINT credit_sales_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_sales_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT credit_sales_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id),
+  CONSTRAINT credit_sales_sku_id_fkey FOREIGN KEY (sku_id) REFERENCES public.product_skus(id),
+  CONSTRAINT credit_sales_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.approved_customers(id)
+);
+CREATE TABLE public.customer_requests (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  name text NOT NULL,
+  phone text,
+  notes text,
+  approved boolean DEFAULT false,
+  rejected boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customer_requests_pkey PRIMARY KEY (id),
+  CONSTRAINT customer_requests_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT customer_requests_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.kiosks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  location text,
+  active boolean DEFAULT true,
+  owner_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  price_per_liter numeric NOT NULL DEFAULT 0,
+  CONSTRAINT kiosks_pkey PRIMARY KEY (id),
+  CONSTRAINT kiosks_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.meter_legacy (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  date date NOT NULL,
+  prev_reading numeric NOT NULL,
+  curr_reading numeric NOT NULL,
+  consumption numeric NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT meter_legacy_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_meter_kiosk FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT fk_meter_staff FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.meter_readings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  date date NOT NULL,
+  opening_reading numeric NOT NULL DEFAULT 0,
+  closing_reading numeric NOT NULL DEFAULT 0,
+  total_liters numeric DEFAULT (closing_reading - opening_reading),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  opening_confirmed boolean DEFAULT false,
+  opening_discrepancy_reason text,
+  CONSTRAINT meter_readings_pkey PRIMARY KEY (id),
+  CONSTRAINT meter_readings_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT meter_readings_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.mpesa (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  date date NOT NULL,
+  amount numeric NOT NULL CHECK (amount >= 0::numeric),
+  customer_name text,
+  mpesa_receipt text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mpesa_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_mpesa_kiosk FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT fk_mpesa_staff FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid,
+  date date NOT NULL,
+  type text NOT NULL,
+  message text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE water.owner_kiosks (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  owner_id uuid,
+  kiosk_id uuid,
+  assigned_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT owner_kiosks_pkey PRIMARY KEY (id),
+  CONSTRAINT owner_kiosks_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.owners(id),
+  CONSTRAINT owner_kiosks_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.owners (
+  id uuid NOT NULL,
+  name text,
+  phone text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT owners_pkey PRIMARY KEY (id),
+  CONSTRAINT owners_id_fkey FOREIGN KEY (id) REFERENCES public.users(id)
+);
+CREATE TABLE public.product_skus (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  liters numeric NOT NULL,
+  price_per_liter numeric NOT NULL DEFAULT 10,
+  total_price numeric DEFAULT (liters * price_per_liter),
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT product_skus_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.profiles (
+  id uuid NOT NULL,
+  updated_at timestamp with time zone DEFAULT now(),
+  role USER-DEFINED DEFAULT 'staff'::user_role,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.reconciliation (
+  kiosk_id uuid NOT NULL,
+  date date NOT NULL,
+  liters_sold numeric DEFAULT 0,
+  cash_sales numeric DEFAULT 0,
+  mpesa_sales numeric DEFAULT 0,
+  cash_inflows numeric DEFAULT 0,
+  mpesa_inflows numeric DEFAULT 0,
+  meter_consumption numeric DEFAULT 0,
+  water_variance numeric DEFAULT 0,
+  cash_variance numeric DEFAULT 0,
+  mpesa_variance numeric DEFAULT 0,
+  status text DEFAULT 'clean'::text,
+  supervisor_id uuid,
+  created_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'Africa/Nairobi'::text),
+  updated_at timestamp with time zone DEFAULT (now() AT TIME ZONE 'Africa/Nairobi'::text),
+  CONSTRAINT reconciliation_pkey PRIMARY KEY (kiosk_id, date),
+  CONSTRAINT fk_recon_kiosk FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.reconciliation_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  session_date date NOT NULL DEFAULT CURRENT_DATE,
+  opening_reading_id uuid NOT NULL,
+  closing_reading_id uuid NOT NULL,
+  total_liters_pumped numeric,
+  total_liters_sold numeric,
+  variance_liters numeric,
+  total_revenue numeric,
+  expected_revenue numeric,
+  variance_revenue numeric,
+  sku_breakdown jsonb NOT NULL DEFAULT '[]'::jsonb,
+  payment_mode_breakdown jsonb NOT NULL DEFAULT '[]'::jsonb,
+  staff_contributions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'pending'::text,
+  supervisor_id uuid,
+  supervisor_comment text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  approved_at timestamp with time zone,
+  amount numeric,
+  staff_id uuid,
+  CONSTRAINT reconciliation_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT reconciliation_sessions_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT reconciliation_sessions_opening_reading_id_fkey FOREIGN KEY (opening_reading_id) REFERENCES public.meter_readings(id),
+  CONSTRAINT reconciliation_sessions_closing_reading_id_fkey FOREIGN KEY (closing_reading_id) REFERENCES public.meter_readings(id),
+  CONSTRAINT reconciliation_sessions_supervisor_id_fkey FOREIGN KEY (supervisor_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.sales (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid NOT NULL,
+  staff_id uuid NOT NULL,
+  date date NOT NULL,
+  sku_id uuid NOT NULL,
+  units integer NOT NULL,
+  liters numeric NOT NULL,
+  amount numeric NOT NULL,
+  payment_mode text NOT NULL CHECK (payment_mode = ANY (ARRAY['cash'::text, 'mpesa'::text, 'credit'::text])),
+  customer_name text,
+  mpesa_receipt text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT sales_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_sales_kiosk FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT fk_sales_staff FOREIGN KEY (staff_id) REFERENCES public.users(id),
+  CONSTRAINT fk_sales_sku FOREIGN KEY (sku_id) REFERENCES public.product_skus(id)
+);
+CREATE TABLE public.sms_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  phone text NOT NULL,
+  message text NOT NULL,
+  status text NOT NULL,
+  provider_response jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT sms_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT sms_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.staff_performance (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid,
+  staff_id uuid,
+  month date NOT NULL,
+  score numeric DEFAULT 0,
+  rating text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT staff_performance_pkey PRIMARY KEY (id),
+  CONSTRAINT staff_performance_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT staff_performance_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.staff_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  staff_id uuid NOT NULL,
+  kiosk_id uuid NOT NULL,
+  session_start timestamp with time zone NOT NULL DEFAULT now(),
+  session_end timestamp with time zone,
+  opening_reading numeric,
+  closing_reading numeric,
+  notes text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT staff_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT staff_sessions_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT staff_sessions_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.supervisor_kiosks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  supervisor_id uuid NOT NULL,
+  kiosk_id uuid NOT NULL,
+  owner_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT supervisor_kiosks_pkey PRIMARY KEY (id),
+  CONSTRAINT supervisor_kiosks_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT supervisor_kiosks_supervisor_id_fkey FOREIGN KEY (supervisor_id) REFERENCES public.users(id),
+  CONSTRAINT supervisor_kiosks_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.user_kiosks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  kiosk_id uuid NOT NULL,
+  role_at_kiosk text NOT NULL CHECK (role_at_kiosk = ANY (ARRAY['staff'::text, 'supervisor'::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT user_kiosks_pkey PRIMARY KEY (id),
+  CONSTRAINT user_kiosks_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT user_kiosks_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.users (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  phone text UNIQUE,
+  role USER-DEFINED NOT NULL,
+  active boolean DEFAULT true,
+  default_kiosk_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  email text,
+  updated_at timestamp with time zone DEFAULT now(),
+  owner_id uuid,
+  pin text,
+  pin_expires_at timestamp with time zone,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id),
+  CONSTRAINT users_default_kiosk_fk FOREIGN KEY (default_kiosk_id) REFERENCES public.kiosks(id)
+);
+CREATE TABLE public.variance_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  kiosk_id uuid,
+  date date NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['mpesa'::text, 'cash'::text, 'water'::text, 'sales'::text])),
+  description text,
+  staff_id uuid,
+  supervisor_id uuid,
+  action_taken text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT variance_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT variance_logs_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT variance_logs_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.users(id),
+  CONSTRAINT variance_logs_supervisor_id_fkey FOREIGN KEY (supervisor_id) REFERENCES public.users(id)
+);
+
+===========================================================================================================================================================
+
+create table public.approved_customers (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  name text not null,
+  phone text null,
+  credit_limit numeric null,
+  active boolean null default true,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint approved_customers_pkey primary key (id),
+  constraint approved_customers_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id)
+) TABLESPACE pg_default;
+
+---------------------------------------------------
+
+create table public.audit_trail (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid null,
+  kiosk_id uuid null,
+  action text not null,
+  table_name text null,
+  record_id uuid null,
+  details jsonb null,
+  created_at timestamp with time zone null default now(),
+  constraint audit_trail_pkey primary key (id),
+  constraint audit_trail_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint audit_trail_user_id_fkey foreign KEY (user_id) references users (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------
+
+create table public.cash (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  date date not null,
+  amount numeric not null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint cash_pkey primary key (id),
+  constraint fk_cash_kiosk foreign KEY (kiosk_id) references kiosks (id),
+  constraint fk_cash_staff foreign KEY (staff_id) references users (id),
+  constraint chk_cash_non_negative check ((amount >= (0)::numeric))
+) TABLESPACE pg_default;
+
+create index IF not exists idx_cash_kiosk_date on public.cash using btree (kiosk_id, date) TABLESPACE pg_default;
+
+------------------------------------------------------------------
+
+create table public.credit_sales (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  sku_id uuid not null,
+  units integer not null,
+  liters numeric not null,
+  amount numeric not null,
+  notes text null,
+  date date not null,
+  paid boolean not null default false,
+  paid_at timestamp with time zone null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  customer_id uuid null,
+  constraint credit_sales_pkey primary key (id),
+  constraint credit_sales_customer_id_fkey foreign KEY (customer_id) references approved_customers (id),
+  constraint credit_sales_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint credit_sales_sku_id_fkey foreign KEY (sku_id) references product_skus (id),
+  constraint credit_sales_staff_id_fkey foreign KEY (staff_id) references users (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------
+
+create table public.customer_requests (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  name text not null,
+  phone text null,
+  notes text null,
+  approved boolean null default false,
+  rejected boolean null default false,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint customer_requests_pkey primary key (id),
+  constraint customer_requests_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint customer_requests_staff_id_fkey foreign KEY (staff_id) references users (id)
+) TABLESPACE pg_default;
+
+------------------------------------------------------------------------
+
+create table public.kiosks (
+  id uuid not null default gen_random_uuid (),
+  name text not null,
+  location text null,
+  active boolean null default true,
+  owner_id uuid null,
+  created_at timestamp with time zone null default now(),
+  price_per_liter numeric not null default 0,
+  constraint kiosks_pkey primary key (id),
+  constraint kiosks_owner_id_fkey foreign KEY (owner_id) references users (id)
+) TABLESPACE pg_default;
+
+--------------------------------------------------------------------------
+
+create table public.meter_legacy (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  date date not null,
+  prev_reading numeric not null,
+  curr_reading numeric not null,
+  consumption numeric not null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint meter_pkey primary key (id),
+  constraint fk_meter_kiosk foreign KEY (kiosk_id) references kiosks (id),
+  constraint fk_meter_staff foreign KEY (staff_id) references users (id),
+  constraint chk_meter_non_negative check (
+    (
+      (prev_reading >= (0)::numeric)
+      and (curr_reading >= (0)::numeric)
+      and (consumption >= (0)::numeric)
+    )
+  )
+) TABLESPACE pg_default;
+
+create unique INDEX IF not exists ux_meter_kiosk_date on public.meter_legacy using btree (kiosk_id, date) TABLESPACE pg_default;
+
+create index IF not exists idx_meter_kiosk_date on public.meter_legacy using btree (kiosk_id, date) TABLESPACE pg_default;
+
+------------------------------------------------------------------------
+
+create table public.meter_readings (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  date date not null,
+  opening_reading numeric not null default 0,
+  closing_reading numeric not null default 0,
+  total_liters numeric GENERATED ALWAYS as ((closing_reading - opening_reading)) STORED null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  opening_confirmed boolean null default false,
+  opening_discrepancy_reason text null,
+  constraint meter_readings_pkey primary key (id),
+  constraint meter_readings_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint meter_readings_staff_id_fkey foreign KEY (staff_id) references users (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------------
+
+create table public.mpesa (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  date date not null,
+  amount numeric not null,
+  customer_name text null,
+  mpesa_receipt text null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint mpesa_pkey primary key (id),
+  constraint fk_mpesa_kiosk foreign KEY (kiosk_id) references kiosks (id),
+  constraint fk_mpesa_staff foreign KEY (staff_id) references users (id),
+  constraint chk_mpesa_non_negative check ((amount >= (0)::numeric))
+) TABLESPACE pg_default;
+
+create index IF not exists idx_mpesa_kiosk_date on public.mpesa using btree (kiosk_id, date) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------------
+
+create table public.notifications (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid null,
+  date date not null,
+  type text not null,
+  message text not null,
+  created_at timestamp with time zone null default now(),
+  constraint notifications_pkey primary key (id),
+  constraint notifications_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id)
+) TABLESPACE pg_default;
+
+------------------------------------------------------------------------------
+
+create table public.owner_kiosks (
+  id bigint generated always as identity not null,
+  owner_id uuid null,
+  kiosk_id uuid null,
+  assigned_at timestamp with time zone null default now(),
+  constraint owner_kiosks_pkey primary key (id),
+  constraint owner_kiosks_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint owner_kiosks_owner_id_fkey foreign KEY (owner_id) references owners (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_owner_kiosks_owner_id on public.owner_kiosks using btree (owner_id) TABLESPACE pg_default;
+
+create index IF not exists idx_owner_kiosks_kiosk_id on public.owner_kiosks using btree (kiosk_id) TABLESPACE pg_default;
+
+-------------------------------------------------------------------------------------
+
+create table public.owners (
+  id uuid not null,
+  name text null,
+  phone text null,
+  created_at timestamp with time zone null default now(),
+  constraint owners_pkey primary key (id),
+  constraint owners_id_fkey foreign KEY (id) references users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+---------------------------------------------------------------------------------------
+
+create table public.product_skus (
+  id uuid not null default gen_random_uuid (),
+  name text not null,
+  liters numeric not null,
+  price_per_liter numeric not null default 10,
+  total_price numeric GENERATED ALWAYS as ((liters * price_per_liter)) STORED null,
+  active boolean not null default true,
+  created_at timestamp with time zone not null default now(),
+  constraint product_skus_pkey primary key (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------------------------
+
+create table public.profiles (
+  id uuid not null,
+  updated_at timestamp with time zone null default now(),
+  role public.user_role null default 'staff'::user_role,
+  constraint profiles_pkey primary key (id),
+  constraint profiles_id_fkey foreign KEY (id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+------------------------------------------------------------------------------------------
+
+create table public.reconciliation (
+  kiosk_id uuid not null,
+  date date not null,
+  liters_sold numeric null default 0,
+  cash_sales numeric null default 0,
+  mpesa_sales numeric null default 0,
+  cash_inflows numeric null default 0,
+  mpesa_inflows numeric null default 0,
+  meter_consumption numeric null default 0,
+  water_variance numeric null default 0,
+  cash_variance numeric null default 0,
+  mpesa_variance numeric null default 0,
+  status text null default 'clean'::text,
+  supervisor_id uuid null,
+  created_at timestamp with time zone null default (now() AT TIME ZONE 'Africa/Nairobi'::text),
+  updated_at timestamp with time zone null default (now() AT TIME ZONE 'Africa/Nairobi'::text),
+  constraint reconciliation_pkey primary key (kiosk_id, date),
+  constraint fk_recon_kiosk foreign KEY (kiosk_id) references kiosks (id),
+  constraint chk_recon_non_negative check (
+    (
+      (liters_sold >= (0)::numeric)
+      and (cash_sales >= (0)::numeric)
+      and (mpesa_sales >= (0)::numeric)
+      and (cash_inflows >= (0)::numeric)
+      and (mpesa_inflows >= (0)::numeric)
+      and (meter_consumption >= (0)::numeric)
+    )
+  )
+) TABLESPACE pg_default;
+
+create unique INDEX IF not exists ux_recon_kiosk_date on public.reconciliation using btree (kiosk_id, date) TABLESPACE pg_default;
+
+create index IF not exists idx_recon_kiosk_date on public.reconciliation using btree (kiosk_id, date) TABLESPACE pg_default;
+
+------------------------------------------------------------------------------------------------------------------------
+
+create table public.reconciliation_sessions (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  session_date date not null default CURRENT_DATE,
+  opening_reading_id uuid not null,
+  closing_reading_id uuid not null,
+  total_liters_pumped numeric null,
+  total_liters_sold numeric null,
+  variance_liters numeric null,
+  total_revenue numeric null,
+  expected_revenue numeric null,
+  variance_revenue numeric null,
+  sku_breakdown jsonb not null default '[]'::jsonb,
+  payment_mode_breakdown jsonb not null default '[]'::jsonb,
+  staff_contributions jsonb not null default '[]'::jsonb,
+  status text not null default 'pending'::text,
+  supervisor_id uuid null,
+  supervisor_comment text null,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  approved_at timestamp with time zone null,
+  amount numeric null,
+  staff_id uuid null,
+  constraint reconciliation_sessions_pkey primary key (id),
+  constraint reconciliation_sessions_closing_reading_id_fkey foreign KEY (closing_reading_id) references meter_readings (id),
+  constraint reconciliation_sessions_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id),
+  constraint reconciliation_sessions_opening_reading_id_fkey foreign KEY (opening_reading_id) references meter_readings (id),
+  constraint reconciliation_sessions_supervisor_id_fkey foreign KEY (supervisor_id) references users (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------------
+
+create table public.sales (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid not null,
+  staff_id uuid not null,
+  date date not null,
+  sku_id uuid not null,
+  units integer not null,
+  liters numeric not null,
+  amount numeric not null,
+  payment_mode text not null,
+  customer_name text null,
+  mpesa_receipt text null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint sales_pkey primary key (id),
+  constraint fk_sales_kiosk foreign KEY (kiosk_id) references kiosks (id),
+  constraint fk_sales_sku foreign KEY (sku_id) references product_skus (id),
+  constraint fk_sales_staff foreign KEY (staff_id) references users (id),
+  constraint chk_sales_non_negative check (
+    (
+      (liters >= (0)::numeric)
+      and (amount >= (0)::numeric)
+    )
+  ),
+  constraint sales_payment_mode_check check (
+    (
+      payment_mode = any (
+        array['cash'::text, 'mpesa'::text, 'credit'::text]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_sales_kiosk_date on public.sales using btree (kiosk_id, date) TABLESPACE pg_default;
+
+create trigger trg_calculate_sale_values BEFORE INSERT on sales for EACH row
+execute FUNCTION calculate_sale_values ();
+
+---------------------------------------------------------------------------------------------------------------------------------
+
+create table public.sms_logs (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid null,
+  phone text not null,
+  message text not null,
+  status text not null,
+  provider_response jsonb null,
+  created_at timestamp with time zone not null default now(),
+  constraint sms_logs_pkey primary key (id),
+  constraint sms_logs_user_id_fkey foreign KEY (user_id) references users (id) on delete set null
+) TABLESPACE pg_default;
+
+create index IF not exists idx_sms_logs_user_id on public.sms_logs using btree (user_id) TABLESPACE pg_default;
+
+create index IF not exists idx_sms_logs_created_at on public.sms_logs using btree (created_at) TABLESPACE pg_default;
+
+------------------------------------------------------------------------------
+
+create table public.staff_performance (
+  id uuid not null default gen_random_uuid (),
+  kiosk_id uuid null,
+  staff_id uuid null,
+  month date not null,
+  score numeric null default 0,
+  rating text null,
+  created_at timestamp with time zone null default now(),
+  constraint staff_performance_pkey primary key (id),
+  constraint staff_performance_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id) on delete CASCADE,
+  constraint staff_performance_staff_id_fkey foreign KEY (staff_id) references users (id)
+) TABLESPACE pg_default;
+
+-----------------------------------------------------------------------------------
+
+create table public.staff_sessions (
+  id uuid not null default gen_random_uuid (),
+  staff_id uuid not null,
+  kiosk_id uuid not null,
+  session_start timestamp with time zone not null default now(),
+  session_end timestamp with time zone null,
+  opening_reading numeric null,
+  closing_reading numeric null,
+  notes text null,
+  created_at timestamp with time zone not null default now(),
+  constraint staff_sessions_pkey primary key (id),
+  constraint staff_sessions_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id) on delete CASCADE,
+  constraint staff_sessions_staff_id_fkey foreign KEY (staff_id) references users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists staff_sessions_active_idx on public.staff_sessions using btree (staff_id) TABLESPACE pg_default
+where
+  (session_end is null);
+
+---------------------------------------------------------------------------------------
+
+create table public.supervisor_kiosks (
+  id uuid not null default gen_random_uuid (),
+  supervisor_id uuid not null,
+  kiosk_id uuid not null,
+  owner_id uuid not null,
+  created_at timestamp with time zone null default now(),
+  constraint supervisor_kiosks_pkey primary key (id),
+  constraint supervisor_kiosks_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id) on delete CASCADE,
+  constraint supervisor_kiosks_owner_id_fkey foreign KEY (owner_id) references users (id),
+  constraint supervisor_kiosks_supervisor_id_fkey foreign KEY (supervisor_id) references users (id)
+) TABLESPACE pg_default;
+
+create index IF not exists supervisor_kiosks_supervisor_id_idx on public.supervisor_kiosks using btree (supervisor_id) TABLESPACE pg_default;
+
+create index IF not exists supervisor_kiosks_kiosk_id_idx on public.supervisor_kiosks using btree (kiosk_id) TABLESPACE pg_default;
+
+create index IF not exists supervisor_kiosks_owner_id_idx on public.supervisor_kiosks using btree (owner_id) TABLESPACE pg_default;
+
+------------------------------------------------------------------------------
+
+create table public.user_kiosks (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid not null,
+  kiosk_id uuid not null,
+  role_at_kiosk text not null,
+  created_at timestamp with time zone null default now(),
+  constraint user_kiosks_pkey primary key (id),
+  constraint user_kiosks_kiosk_id_fkey foreign KEY (kiosk_id) references kiosks (id) on delete CASCADE,
+  constraint user_kiosks_user_id_fkey foreign KEY (user_id) references users (id) on delete CASCADE,
+  constraint user_kiosks_role_at_kiosk_check check (
+    (
+      role_at_kiosk = any (array['staff'::text, 'supervisor'::text])
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_user_kiosks_user_id on public.user_kiosks using btree (user_id) TABLESPACE pg_default;
+
+create index IF not exists idx_user_kiosks_kiosk_id on public.user_kiosks using btree (kiosk_id) TABLESPACE pg_default;
+
+---------------------------------------------------------------------------------------
+
+create table public.users (
+  id uuid not null default gen_random_uuid (),
+  name text not null,
+  phone text null,
+  role public.user_role not null,
+  active boolean null default true,
+  default_kiosk_id uuid null,
+  created_at timestamp with time zone null default now(),
+  email text null,
+  updated_at timestamp with time zone null default now(),
+  owner_id uuid null,
+  pin text null,
+  pin_expires_at timestamp with time zone null,
+  constraint users_pkey primary key (id),
+  constraint users_phone_unique unique (phone),
+  constraint users_default_kiosk_fk foreign KEY (default_kiosk_id) references kiosks (id) on delete set null,
+  constraint users_owner_id_fkey foreign KEY (owner_id) references users (id)
+) TABLESPACE pg_default;
+
+create trigger update_users_updated_at BEFORE
+update on users for EACH row
+execute FUNCTION update_updated_at_column ();
+
+-----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
