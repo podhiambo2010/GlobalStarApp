@@ -1,3 +1,12 @@
+"""
+Global Star Investments - Backend Engine
+==================================================
+GOVERNANCE & ARCHITECTURE CONSTITUTION:
+- Data Integrity: All financial/eTIMS calculations must be deterministic and audited.
+- Security: Zero hardcoded secrets; environment variables (.env) are mandatory.
+- Modularity: Strict separation between database layers, business logic, and UI.
+"""
+
 import os
 import re
 import json
