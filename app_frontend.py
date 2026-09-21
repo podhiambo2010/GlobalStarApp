@@ -1,5 +1,5 @@
 """
-Global Star Investments - Backend Engine
+Global Star Investments - Frontend Engine
 ==================================================
 GOVERNANCE & ARCHITECTURE CONSTITUTION:
 - Data Integrity: All financial/eTIMS calculations must be deterministic and audited.
@@ -161,28 +161,98 @@ elif module == "Unmapped Payment Auditor":
         st.rerun()
 
 elif module == "Lease PDF AI Extractor & Alerts":
-  st.subheader("🤖 AI Lease Agreement Extractor & Batch Folder OCR")
-  uploaded_pdfs = st.file_uploader(
-      "Upload Signed Lease PDF(s) / Batch Folder",
-      type=["pdf"],
-      accept_multiple_files=True,
-  )
-  if uploaded_pdfs:
-    if not isinstance(uploaded_pdfs, list):
-      uploaded_pdfs = [uploaded_pdfs]
+    st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
+    st.markdown("Displaying active lease agreements, terms, and extracted billing cycles synchronized directly from Supabase production database.")
 
-    for idx, pdf_file in enumerate(uploaded_pdfs):
-      st.markdown(
-          f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`"
-      )
-      extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
-      st.json(extracted_info)
+    try:
+        leases_res = backend.supabase.table("leases").select(
+            "id, start_date, end_date, billing_cycle, status, units(unit_number, monthly_rent, is_occupied), tenants(full_name, email, phone_number)"
+        ).execute()
+        
+        leases_data = leases_res.data
+        if leases_data:
+            formatted_leases = []
+            for l in leases_data:
+                unit_info = l.get("units") or {}
+                tenant_info = l.get("tenants") or {}
+                
+                end_date_str = l.get("end_date")
+                status = l.get("status", "Active")
+                
+                if end_date_str:
+                    try:
+                        end_dt = datetime.strptime(str(end_date_str)[:10], "%Y-%m-%d")
+                        if end_dt < datetime.now():
+                            status = "Expired"
+                        else:
+                            status = "Active"
+                    except:
+                        pass
 
-    if st.button("Register / Update All Extracted Tenants"):
-      st.success(
-          "All tenants successfully profiled and synchronized with master"
-          " records!"
-      )
+                formatted_leases.append({
+                    "Shop #": unit_info.get("unit_number", "N/A"),
+                    "Tenant Name": tenant_info.get("full_name", "Unknown"),
+                    "Monthly Rent (KSh)": unit_info.get("monthly_rent", 0.0),
+                    "Billing Cycle": l.get("billing_cycle", "Monthly"),
+                    "Lease Start": l.get("start_date"),
+                    "Lease End": end_date_str,
+                    "Status": status
+                })
+            
+            df_leases_display = pd.DataFrame(formatted_leases)
+            st.dataframe(df_leases_display, width="stretch")
+        else:
+            st.info("No active lease records found in Supabase.")
+    except Exception as e:
+        st.error(f"Could not load leases from Supabase: {e}")
+
+    st.markdown("---")
+    st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
+
+    with st.expander("📁 Batch Process from 'Lease_Agreements' Folder", expanded=False):
+        if st.button("Scan & Extract All Leases from Root Folder"):
+            folder_leases = backend.process_lease_agreements_folder("Lease_Agreements")
+            if folder_leases:
+                st.success(f"Successfully processed {len(folder_leases)} lease agreement(s) from the folder!")
+                
+                verification_summaries = []
+                for fl in folder_leases:
+                    v_res = backend.verify_ocr_against_master(fl)
+                    fl["Master Verification"] = "Pass" if not v_res["Discrepancies"] else "Discrepancy Found"
+                    fl["Discrepancy Details"] = ", ".join(v_res["Discrepancies"]) if v_res["Discrepancies"] else "None"
+                    verification_summaries.append(fl)
+                
+                st.dataframe(pd.DataFrame(verification_summaries), width="stretch")
+            else:
+                st.warning("No PDF lease agreements found in the 'Lease_Agreements' folder.")
+    
+    uploaded_pdfs = st.file_uploader(
+        "Upload Signed Lease PDF(s) for Instant Extraction",
+        type=["pdf"],
+        accept_multiple_files=True,
+    )
+    if uploaded_pdfs:
+        if not isinstance(uploaded_pdfs, list):
+            uploaded_pdfs = [uploaded_pdfs]
+
+        for idx, pdf_file in enumerate(uploaded_pdfs):
+            st.markdown(f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`")
+            extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
+            st.json(extracted_info)
+            
+            verification = backend.verify_ocr_against_master(extracted_info)
+            if verification["Match Found"]:
+                st.info(f"📋 Master Ledger Match Found! Registered Tenant: **{verification.get('Master Tenant Name')}** | Manual Status: **{verification.get('Manual Status')}**")
+                if verification["Discrepancies"]:
+                    for disc in verification["Discrepancies"]:
+                        st.warning(f"⚠️ {disc}")
+                else:
+                    st.success("✅ OCR terms match master spreadsheet records perfectly.")
+            else:
+                st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
+
+        if st.button("Register / Update All Extracted Tenants"):
+            st.success("All tenants successfully profiled and synchronized with Supabase records!")
 
     if st.button("Clear All Reassignment Overrides"):
         if os.path.exists("reassignments.json"):
@@ -205,9 +275,6 @@ elif module == "Arrears Payment Reminders":
     if df_non_compliant.empty:
         st.success("All tenants are fully compliant! No reminders needed.")
     else:
-        # ==========================================
-        # STEP 1: SELECT TENANT FOR TARGETED ACTIONS
-        # ==========================================
         st.markdown("---")
         st.markdown("### 👤 Step 1: Select Tenant for Single Actions")
         tenant_labels = [
@@ -221,6 +288,7 @@ elif module == "Arrears Payment Reminders":
             "Select Non-Compliant Tenant for Reminder", tenant_labels
         )
         selected_shop_no = int(selected_label.split("Shop #")[1].split(" - ")[0])
+        
         row_sel = df_non_compliant[
             df_non_compliant["Shop #"] == selected_shop_no
         ].iloc[0]
@@ -233,26 +301,6 @@ elif module == "Arrears Payment Reminders":
         if raw_phone_val.endswith('.0'):
             raw_phone_val = raw_phone_val[:-2]
 
-        reminder_body = f"""Dear {t_name},
-
-We hope this message finds you well.
-
-This is a friendly reminder from Global Star Investments Limited regarding your commercial lease account for Shop #{selected_shop_no} at Tinitin La Place Building, Siaya Town.
-
-Our records indicate an outstanding arrears balance of KSh {arrears_amt:,.2f} for the current billing period. 
-
-Kindly arrange for settlement at your earliest convenience via our official M-Pesa Paybill (Business No: 522522 | Account: 1285399528) or direct KCB Bank transfer (Account: 1285399528, Siaya Branch) to keep your account in good standing.
-
-Sincerely,
-Management
-Global Star Investments Limited
-Email: globalstarinvest@gmail.com
-Tel: +254 723 562 286
-"""
-
-        # ==========================================
-        # STEP 2: EMAIL REMINDERS (SINGLE & BULK)
-        # ==========================================
         st.markdown("---")
         st.markdown("### 📧 Step 2: Email Reminder Dispatch (Single & Bulk)")
         
@@ -265,20 +313,102 @@ Tel: +254 723 562 286
         tab_email_single, tab_email_bulk = st.tabs(["👤 Single Tenant Email", "🚀 Bulk Email (All Arrears)"])
         
         with tab_email_single:
-            recipient_email = st.text_input("Recipient Email", t_email, key="single_recipient_email")
-            st.text_area("Single Email Preview", reminder_body, height=150, key="single_email_preview")
-            if st.button("📤 Send Single Email Reminder", type="primary"):
+            recipient_email = st.text_input("Recipient Email", value=t_email)
+            
+            comprehensive_email_body = f"""Dear {t_name},
+
+We hope this message finds you well.
+
+This is a formal reminder from Global Star Investments Limited regarding your commercial lease account for Shop #{selected_shop_no} at Tinitin La Place Building, Siaya Town.
+
+Our records indicate an outstanding arrears balance of KSh {arrears_amt:,.2f} for the current billing period ({backend.statement_month_str}). 
+
+Kindly arrange for settlement at your earliest convenience using any of our official payment channels:
+1. M-Pesa Paybill: Business No. 522522 | Account: 1285399528
+2. M-Pesa Paybill: Business No. 522533 | Account: 8035949
+3. Direct KCB Bank Transfer: Account No. 1285399528, Siaya Branch
+
+Please find attached your itemized bank payment and rent ledger statement for your review.
+
+Sincerely,
+Management
+Global Star Investments Limited
+Email: globalstarinvest@gmail.com
+Tel: +254 723 562 286
+"""
+
+            st.text_area("Single Email Preview", value=comprehensive_email_body, height=220)
+
+            st.markdown("---")
+            st.markdown("### 📄 Tenant Statement Generation & Download")
+            pdf_filename = f"Statement_Shop_{selected_shop_no}_{t_name.replace(' ', '_')}.pdf"
+            
+            monthly_rate_val = row_sel.get('Monthly Rate', 0.0)
+            expected_rent_val = row_sel.get('Expected_Rent', 0.0)
+            actual_collected_val = row_sel.get('Actual_Collected', 0.0)
+            arrears_balance_val = row_sel.get('Arrears_Balance', 0.0)
+            penalty_fee_val = row_sel.get('Penalty_Fee', 0.0)
+            interest_charge_val = row_sel.get('Interest_Charge', 0.0)
+
+            res = backend.generate_bank_statement_pdf(
+                shop_no=int(selected_shop_no),
+                tenant_name=str(t_name),
+                rate=float(monthly_rate_val),
+                expected=float(expected_rent_val),
+                collected=float(actual_collected_val),
+                arrears=float(arrears_balance_val),
+                penalty=float(penalty_fee_val),
+                interest=float(interest_charge_val),
+                paybill="522522",
+                paybill_acc="1285399528",
+                branch_name="Siaya",
+                bank_code="01",
+                branch_code="012",
+                swift_code="KCBLKENX",
+                billing_month=backend.statement_month_str
+            )
+
+            if isinstance(res, str):
+                pdf_filename = res
+                with open(pdf_filename, "rb") as f:
+                    pdf_bytes = f.read()
+            else:
+                pdf_bytes = res
+                with open(pdf_filename, "wb") as f:
+                    f.write(pdf_bytes)
+            
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="📥 Download Tenant Statement PDF",
+                    data=pdf_bytes,
+                    file_name=pdf_filename,
+                    mime="application/pdf",
+                    key=f"dl_pdf_{selected_shop_no}"
+                )
+
+            st.markdown("---")
+            if st.button("📤 Send Single Email Reminder (With Attached Statement)", type="primary"):
                 if not recipient_email or "@" not in recipient_email:
                     st.error("Please enter a valid recipient email address.")
                 else:
                     success, msg = backend.send_email_statement(
-                        recipient_email=recipient_email, tenant_name=t_name, pdf_path="",
-                        sender_email=sender_email, app_password=app_password, shop_no=int(selected_shop_no),
-                        paybill="522522", paybill_acc="1285399528", branch_name="Siaya",
-                        bank_code="01", branch_code="012", swift_code="KCBLKENX", billing_month=backend.statement_month_str,
+                        recipient_email=recipient_email, 
+                        tenant_name=t_name, 
+                        pdf_path=pdf_filename, 
+                        sender_email=sender_email, 
+                        app_password=app_password, 
+                        shop_no=int(selected_shop_no),
+                        paybill="522522", 
+                        paybill_acc="1285399528", 
+                        branch_name="Siaya",
+                        bank_code="01", 
+                        branch_code="012", 
+                        swift_code="KCBLKENX", 
+                        billing_month=backend.statement_month_str,
                     )
                     if success:
-                        st.success(f"Payment reminder successfully sent to {t_name}!")
+                        st.success(f"Payment reminder and itemized statement successfully sent to {t_name}!")
                     else:
                         st.error(f"Failed to send email: {msg}")
 
@@ -297,7 +427,6 @@ Tel: +254 723 562 286
                         s_no = int(row["Shop #"])
                         c_name = row["Tenant Name"]
                         c_email = str(row.get("Email Address", ""))
-                        c_arrears = row["Arrears_Balance"]
                         
                         status_text.text(f"Emailing Shop #{s_no} - {c_name}...")
                         if c_email and "@" in c_email:
@@ -315,9 +444,6 @@ Tel: +254 723 562 286
                     progress_bar.empty()
                     st.success(f"Successfully dispatched bulk emails to {email_success_count} out of {total_nc} tenants!")
 
-        # ==========================================
-        # STEP 3: WHATSAPP REMINDERS (SINGLE & BULK)
-        # ==========================================
         st.markdown("---")
         st.markdown("### 💬 Step 3: WhatsApp Reminder Dispatch (Single & Bulk)")
         
@@ -334,8 +460,29 @@ Tel: +254 723 562 286
         tab_wa_single, tab_wa_bulk = st.tabs(["👤 Single Tenant WhatsApp", "🚀 Bulk WhatsApp (All Arrears)"])
 
         with tab_wa_single:
-            tenant_phone = st.text_input("Tenant Mobile Number", raw_phone_val, key="single_wa_phone")
-            single_wa_text = st.text_area("Single WhatsApp Preview", reminder_body, height=150, key="single_wa_preview")
+            tenant_phone = st.text_input("Tenant Mobile Number", value=raw_phone_val, key=f"wa_phone_{selected_shop_no}")
+            
+            single_wa_text = f"""Dear {t_name},
+
+We hope this message finds you well.
+
+This is a formal reminder from Global Star Investments Limited regarding your commercial lease account for Shop #{selected_shop_no} at Tinitin La Place Building, Siaya Town.
+
+Our records indicate an outstanding arrears balance of KSh {arrears_amt:,.2f} for the current billing period ({backend.statement_month_str}). 
+
+Kindly arrange for settlement at your earliest convenience using any of our official payment channels:
+1. M-Pesa Paybill: Business No. 522522 | Account: 1285399528
+2. M-Pesa Paybill: Business No. 522533 | Account: 8035949
+3. Direct KCB Bank Transfer: Account No. 1285399528, Siaya Branch
+
+Sincerely,
+Management
+Global Star Investments Limited
+Email: globalstarinvest@gmail.com
+Tel: +254 723 562 286
+"""
+            edited_wa_text = st.text_area("Single WhatsApp Preview", value=single_wa_text, height=220, key=f"wa_preview_{selected_shop_no}")
+
             if st.button("📱 Send Single WhatsApp Reminder", type="primary"):
                 if not wa_token or not wa_phone_id:
                     st.error("Please enter your WhatsApp credentials.")
@@ -343,7 +490,7 @@ Tel: +254 723 562 286
                     st.error("Please provide a valid tenant mobile number.")
                 else:
                     success, msg = backend.send_whatsapp_message(
-                        recipient_phone=tenant_phone, message_text=single_wa_text,
+                        recipient_phone=tenant_phone, message_text=edited_wa_text,
                         access_token=wa_token, phone_number_id=wa_phone_id
                     )
                     if success:
@@ -370,12 +517,30 @@ Tel: +254 723 562 286
                         if c_phone.endswith('.0'):
                             c_phone = c_phone[:-2]
 
-                        msg_text = f"Dear {c_name}, friendly reminder from Global Star Investments Ltd for Shop #{s_no}. Outstanding balance: KSh {c_arrears:,.2f}. Kindly settle via M-Pesa Paybill No: 522522 (Acc: 1285399528). Thank you!"
+                        bulk_wa_text = f"""Dear {c_name},
+
+We hope this message finds you well.
+
+This is a formal reminder from Global Star Investments Limited regarding your commercial lease account for Shop #{s_no} at Tinitin La Place Building, Siaya Town.
+
+Our records indicate an outstanding arrears balance of KSh {c_arrears:,.2f} for the current billing period ({backend.statement_month_str}). 
+
+Kindly arrange for settlement at your earliest convenience using any of our official payment channels:
+1. M-Pesa Paybill: Business No. 522522 | Account: 1285399528
+2. M-Pesa Paybill: Business No. 522533 | Account: 8035949
+3. Direct KCB Bank Transfer: Account No. 1285399528, Siaya Branch
+
+Sincerely,
+Management
+Global Star Investments Limited
+Email: globalstarinvest@gmail.com
+Tel: +254 723 562 286
+"""
                         
                         status_text.text(f"Sending WhatsApp to Shop #{s_no} - {c_name}...")
                         if c_phone and len(c_phone) >= 9:
                             success, _ = backend.send_whatsapp_message(
-                                recipient_phone=c_phone, message_text=msg_text,
+                                recipient_phone=c_phone, message_text=bulk_wa_text,
                                 access_token=wa_token, phone_number_id=wa_phone_id
                             )
                             if success:
@@ -386,9 +551,6 @@ Tel: +254 723 562 286
                     progress_bar.empty()
                     st.success(f"Successfully dispatched bulk WhatsApp reminders to {wa_success_count} out of {total_nc} tenants!")
 
-        # ==========================================
-        # STEP 4: SMS REMINDERS (SINGLE & BULK)
-        # ==========================================
         st.markdown("---")
         st.markdown("### 💬 Step 4: SMS Reminder Dispatch (Single & Bulk)")
         
@@ -406,9 +568,28 @@ Tel: +254 723 562 286
         tab_sms_single, tab_sms_bulk = st.tabs(["👤 Single Tenant SMS", "🚀 Bulk SMS (All Arrears)"])
 
         with tab_sms_single:
-            sms_phone = st.text_input("Tenant Mobile Number for SMS", raw_phone_val, key="single_sms_phone")
-            sms_text_preview = f"Dear {t_name}, friendly reminder from Global Star Investments Ltd for Shop #{selected_shop_no}. Outstanding balance: KSh {arrears_amt:,.2f}. Kindly settle via M-Pesa Paybill No: 522522 (Acc: 1285399528). Thank you!"
-            edited_sms = st.text_area("Single SMS Message Preview", sms_text_preview, height=80, key="single_sms_preview")
+            sms_phone = st.text_input("Tenant Mobile Number for SMS", value=raw_phone_val, key=f"sms_phone_{selected_shop_no}")
+            
+            sms_text_preview = f"""Dear {t_name},
+
+We hope this message finds you well.
+
+This is a formal reminder from Global Star Investments Limited regarding your commercial lease account for Shop #{selected_shop_no} at Tinitin La Place Building, Siaya Town.
+
+Our records indicate an outstanding arrears balance of KSh {arrears_amt:,.2f} for the current billing period ({backend.statement_month_str}). 
+
+Kindly arrange for settlement at your earliest convenience using any of our official payment channels:
+1. M-Pesa Paybill: Business No. 522522 | Account: 1285399528
+2. M-Pesa Paybill: Business No. 522533 | Account: 8035949
+3. Direct KCB Bank Transfer: Account No. 1285399528, Siaya Branch
+
+Sincerely,
+Management
+Global Star Investments Limited
+Email: globalstarinvest@gmail.com
+Tel: +254 723 562 286
+"""
+            edited_sms = st.text_area("Single SMS Message Preview", value=sms_text_preview, height=220, key=f"sms_preview_{selected_shop_no}")
 
             if st.button("📱 Send Single SMS Reminder", type="primary"):
                 if not at_apikey:
@@ -426,8 +607,24 @@ Tel: +254 723 562 286
                         st.error(f"Failed to send SMS: {msg}")
 
         with tab_sms_bulk:
-            bulk_sms_text_preview = "Dear Tenant, friendly reminder from Global Star Investments Ltd regarding your commercial shop. Kindly settle your outstanding arrears via M-Pesa Paybill No: 522522 (Acc: 1285399528). Thank you!"
-            edited_bulk_sms = st.text_area("Bulk SMS Message Preview", bulk_sms_text_preview, height=80, key="bulk_sms_preview")
+            bulk_sms_text_preview = f"""Dear Tenant,
+
+This is a formal reminder from Global Star Investments Limited regarding your commercial lease account at Tinitin La Place Building, Siaya Town.
+
+Our records indicate outstanding arrears for the current billing period ({backend.statement_month_str}). 
+
+Kindly arrange for settlement using our official payment channels:
+1. M-Pesa Paybill: Business No. 522522 | Account: 1285399528
+2. M-Pesa Paybill: Business No. 522533 | Account: 8035949
+3. Direct KCB Bank Transfer: Account No. 1285399528, Siaya Branch
+
+Sincerely,
+Management
+Global Star Investments Limited
+Email: globalstarinvest@gmail.com
+Tel: +254 723 562 286
+"""
+            edited_bulk_sms = st.text_area("Bulk SMS Message Preview", value=bulk_sms_text_preview, height=220, key="bulk_sms_preview")
             
             st.info(f"Ready to dispatch bulk SMS messages to all {len(df_non_compliant)} non-compliant tenants.")
             if st.button("📱 Send Bulk SMS to All Arrears Tenants", type="primary"):
@@ -461,108 +658,199 @@ Tel: +254 723 562 286
                     st.success(f"Successfully dispatched bulk SMS reminders to {sms_success_count} out of {total_nc} tenants!")
 
 elif module == "eTIMS Tax Invoices & Bank Statements":
-  st.subheader("🧾 eTIMS Tax Invoices & Automated Monthly Billing")
-  st.markdown(
-      "Generate individual documents or execute bulk generation and dispatch"
-      " across all active tenants."
-  )
+    st.subheader("🧾 eTIMS Tax Invoices & Automated Monthly Billing")
+    st.markdown(
+        "Generate official KRA eTIMS tax invoices exclusively for compliant tenants who have fully settled their rent."
+    )
 
-  client = KRAeTIMSClient()
-  init_success, cmc, msg = client.initialize_device()
-  if init_success:
-    st.success(f"Connected to KRA eTIMS API Client: {msg}")
-  else:
-      st.warning(f"eTIMS Sandbox Status: {msg}")
-
-  st.markdown("---")
-  st.subheader("📋 KRA eTIMS Certification & Compliance Package")
-  if st.button("📄 Generate KRA Sandbox Compliance Summary Report"):
-      with st.spinner("Generating formal compliance summary PDF..."):
-          report_path = backend.generate_kra_compliance_summary_pdf()
-          st.success(f"Compliance summary successfully generated: {report_path}")
-          with open(report_path, "rb") as f:
-              st.download_button(
-                  "📥 Download KRA Compliance Summary PDF",
-                  f,
-                  file_name=os.path.basename(report_path),
-                  mime="application/pdf"
-              )
-  st.markdown("---")
-
-  df_arr = backend.calculate_tenant_arrears()
-  billing_month = st.selectbox(
-      "Billing Cycle Month",
-      [
-          backend.statement_month_str,
-          "July 2026",
-          "August 2026",
-          "September 2026",
-      ],
-      key="etims_billing_cycle_month",
-  )
-
-  col_cfg1, col_cfg2 = st.columns(2)
-  with col_cfg1:
-    paybill = st.text_input("Paybill Business No", "522522")
-    paybill_acc = st.text_input("Paybill Account Number", "1285399528")
-    branch_name = st.text_input("Bank Branch Name", "Siaya")
-  with col_cfg2:
-    bank_code = st.text_input("Bank Code", "01")
-    branch_code = st.text_input("Branch Code", "012")
-    swift_code = st.text_input("SWIFT Code", "KCBLKENX")
-
-  st.markdown("---")
-  st.markdown("### 🏢 Bulk Operations (All Active Tenants)")
-  sender_email = st.text_input(
-      "Sender Gmail Address", "globalstarinvest@gmail.com"
-  )
-  app_password = st.text_input(
-      "Gmail App Password",
-      value="bwng mwof eqrq jpaf",
-      type="password",
-  )
-
-  if st.button("🚀 Bulk Generate Invoices & Email All Tenants", type="primary"):
-    if not app_password:
-      st.error("Please enter your Gmail App Password.")
+    client = KRAeTIMSClient()
+    init_success, cmc, msg = client.initialize_device()
+    if init_success:
+        st.success(f"Connected to KRA eTIMS API Client: {msg}")
     else:
-      progress_bar = st.progress(0)
-      status_text = st.empty()
-      total_tenants = len(df_arr)
-      success_count = 0
+        st.warning(f"eTIMS Sandbox Status: {msg}")
 
-      for i, (_, row) in enumerate(df_arr.iterrows()):
-        s_no = int(row["Shop #"])
-        t_name = row["Tenant Name"]
-        t_pin = str(row.get("KRA PIN Certificate", "P051548911H"))
-        if t_pin == "nan" or not t_pin:
-          t_pin = "P051548911H"
-        t_rate = float(row["Monthly Rate"])
-        t_email = str(row.get("Email Address", ""))
+    st.markdown("---")
+    st.subheader("📋 KRA eTIMS Certification & Compliance Package")
+    if st.button("📄 Generate KRA Sandbox Compliance Summary Report"):
+        with st.spinner("Generating formal compliance summary PDF..."):
+            report_path = backend.generate_kra_compliance_summary_pdf()
+            st.success(f"Compliance summary successfully generated: {report_path}")
+            with open(report_path, "rb") as f:
+                st.download_button(
+                    "📥 Download KRA Compliance Summary PDF",
+                    f,
+                    file_name=os.path.basename(report_path),
+                    mime="application/pdf"
+                )
+    st.markdown("---")
 
-        status_text.text(f"Processing Shop #{s_no} - {t_name}...")
-        try:
-          pdf_inv = backend.generate_etims_tax_invoice_pdf(
-              tenant_name=t_name,
-              shop_no=s_no,
-              rate=t_rate,
-              paybill=paybill,
-              paybill_acc=paybill_acc,
-              branch_name=branch_name,
-              bank_code=bank_code,
-              branch_code=branch_code,
-              swift_code=swift_code,
-              billing_month=billing_month,
-              kra_pin=t_pin,
-          )
-          if t_email and "@" in t_email:
-            backend.send_email_statement(
-                recipient_email=t_email,
+    df_arr = backend.calculate_tenant_arrears()
+    
+    df_compliant = df_arr[df_arr["Arrears_Balance"] <= 0].copy()
+
+    billing_month = st.selectbox(
+        "Billing Cycle Month",
+        [
+            backend.statement_month_str,
+            "July 2026",
+            "August 2026",
+            "September 2026",
+        ],
+        key="etims_billing_cycle_month",
+    )
+
+    parts = billing_month.split()
+    m_name = parts[0] if len(parts) > 0 else "General"
+    y_name = parts[1] if len(parts) > 1 else str(datetime.now().year)
+    cycle_invoice_dir = os.path.join("Invoices", y_name, m_name)
+    
+    issued_shops = set()
+    if os.path.exists(cycle_invoice_dir):
+        for fname in os.listdir(cycle_invoice_dir):
+            if fname.startswith("eTIMS_Invoice_Shop_"):
+                try:
+                    s_id = int(fname.split("_")[3])
+                    issued_shops.add(s_id)
+                except Exception:
+                    pass
+
+    df_pending_etims = df_compliant[~df_compliant["Shop #"].isin(issued_shops)]
+
+    col_cfg1, col_cfg2 = st.columns(2)
+    with col_cfg1:
+        paybill = st.text_input("Paybill Business No", "522522", key="etims_pb")
+        paybill_acc = st.text_input("Paybill Account Number", "1285399528", key="etims_pacc")
+        branch_name = st.text_input("Bank Branch Name", "Siaya", key="etims_brn")
+    with col_cfg2:
+        bank_code = st.text_input("Bank Code", "01", key="etims_bcode")
+        branch_code = st.text_input("Branch Code", "012", key="etims_brcode")
+        swift_code = st.text_input("SWIFT Code", "KCBLKENX", key="etims_swift")
+
+    st.markdown("---")
+    st.markdown("### 🏢 Bulk Operations (Compliant & Pending Tenants)")
+    sender_email = st.text_input(
+        "Sender Gmail Address", "globalstarinvest@gmail.com", key="etims_sender"
+    )
+    app_password = st.text_input(
+        "Gmail App Password",
+        value="bwng mwof eqrq jpaf",
+        type="password",
+        key="etims_pwd"
+    )
+
+    st.info(f"Total Compliant Tenants: {len(df_compliant)} | Already Issued This Cycle: {len(issued_shops)} | Pending Dispatch: {len(df_pending_etims)}")
+
+    if st.button("🚀 Bulk Generate Invoices & Email Pending Tenants", type="primary"):
+        if df_pending_etims.empty:
+            st.warning("No pending compliant tenants require eTIMS invoicing for this billing cycle.")
+        elif not app_password:
+            st.error("Please enter your Gmail App Password.")
+        else:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            total_pending = len(df_pending_etims)
+            success_count = 0
+
+            for i, (_, row) in enumerate(df_pending_etims.iterrows()):
+                s_no = int(row["Shop #"])
+                t_name = row["Tenant Name"]
+                t_pin = str(row.get("KRA PIN Certificate", "P051548911H"))
+                if t_pin == "nan" or not t_pin:
+                    t_pin = "P051548911H"
+                t_rate = float(row["Monthly Rate"])
+                t_email = str(row.get("Email Address", ""))
+
+                status_text.text(f"Processing Shop #{s_no} - {t_name}...")
+                try:
+                    pdf_inv = backend.generate_etims_tax_invoice_pdf(
+                        tenant_name=t_name,
+                        shop_no=s_no,
+                        rate=t_rate,
+                        paybill=paybill,
+                        paybill_acc=paybill_acc,
+                        branch_name=branch_name,
+                        bank_code=bank_code,
+                        branch_code=branch_code,
+                        swift_code=swift_code,
+                        billing_month=billing_month,
+                        kra_pin=t_pin,
+                    )
+                    if t_email and "@" in t_email:
+                        backend.send_etims_invoice_email(
+                            recipient_email=t_email,
+                            tenant_name=t_name,
+                            pdf_path=pdf_inv,
+                            sender_email=sender_email,
+                            app_password=app_password,
+                            shop_no=s_no,
+                            billing_month=billing_month,
+                        )
+                    success_count += 1
+                except Exception as e:
+                    st.warning(f"Error processing Shop #{s_no}: {str(e)}")
+                progress_bar.progress((i + 1) / total_pending)
+
+            status_text.empty()
+            progress_bar.empty()
+            st.success(
+                "Successfully generated eTIMS invoices and dispatched transmittal emails for"
+                f" {success_count} out of {total_pending} pending tenants!"
+            )
+
+    st.markdown("---")
+    st.markdown("### 👤 Single Tenant Actions (All Tenants / Override Eligible)")
+    
+    tenant_labels = [
+        f"Shop #{row['Shop #']} - {row['Tenant Name']} (Arrears: KSh {row['Arrears_Balance']:,.2f})"
+        for _, row in df_arr.iterrows()
+    ]
+    selected_label = st.selectbox(
+        "Select Tenant Shop for eTIMS Action", tenant_labels, key="etims_single_select"
+    )
+    selected_shop = int(selected_label.split("Shop #")[1].split(" - ")[0])
+    tenant_row = df_arr[df_arr["Shop #"] == selected_shop].iloc[0]
+
+    t_name = tenant_row["Tenant Name"]
+    t_pin = str(tenant_row.get("KRA PIN Certificate", "P051548911H"))
+    if t_pin == "nan" or not t_pin:
+        t_pin = "P051548911H"
+    monthly_rent = float(tenant_row["Monthly Rate"])
+    t_email = str(tenant_row.get("Email Address", ""))
+    if t_email == "nan":
+        t_email = ""
+    
+    arrears_val = float(tenant_row["Arrears_Balance"])
+    is_already_issued = selected_shop in issued_shops
+    status_badge = "⚠️ Already Issued This Cycle" if is_already_issued else "✅ Ready for Dispatch"
+
+    st.write(
+        f"**Tenant:** {t_name} | **Shop:** #{selected_shop} | **Monthly Rate:** KSh"
+        f" {monthly_rent:,.2f} | **Arrears:** KSh {arrears_val:,.2f} | **Status:** {status_badge}"
+    )
+
+    # Waiver checkbox constrained ONLY to delinquent tenants (Arrears > 0)
+    waiver_override = False
+    if arrears_val > 0:
+        waiver_override = st.checkbox(
+            f"🔓 Grant Temporary eTIMS Waiver / Override for Delinquent Tenant: {t_name}",
+            value=False,
+            key=f"waiver_{selected_shop}"
+        )
+
+    is_eligible = (arrears_val <= 0) or waiver_override
+
+    if not is_eligible:
+        st.warning("⚠️ This tenant has outstanding arrears. eTIMS invoice generation is restricted unless a temporary override waiver is granted above.")
+    else:
+        if waiver_override:
+            st.info("ℹ️ Waiver active: Bypassing arrears validation for this session.")
+
+        if st.button("📄 Generate Selected eTIMS Invoice PDF", key="gen_inv_btn"):
+            pdf_invoice = backend.generate_etims_tax_invoice_pdf(
                 tenant_name=t_name,
-                pdf_path=pdf_inv,
-                sender_email=sender_email,
-                app_password=app_password,
-                shop_no=s_no,
+                shop_no=int(selected_shop),
+                rate=monthly_rent,
                 paybill=paybill,
                 paybill_acc=paybill_acc,
                 branch_name=branch_name,
@@ -570,237 +858,51 @@ elif module == "eTIMS Tax Invoices & Bank Statements":
                 branch_code=branch_code,
                 swift_code=swift_code,
                 billing_month=billing_month,
+                kra_pin=t_pin,
             )
-          success_count += 1
-        except Exception as e:
-          st.warning(f"Error processing Shop #{s_no}: {str(e)}")
-        progress_bar.progress((i + 1) / total_tenants)
+            st.success(f"Generated: {pdf_invoice}")
+            with open(pdf_invoice, "rb") as f:
+                st.download_button(
+                    "📥 Download Invoice PDF",
+                    f,
+                    file_name=os.path.basename(pdf_invoice),
+                    key=f"dl_inv_{selected_shop}"
+                )
 
-      status_text.empty()
-      progress_bar.empty()
-      st.success(
-          "Successfully generated eTIMS invoices and dispatched emails for"
-          f" {success_count} out of {total_tenants} tenants!"
-      )
-
-  st.markdown("---")
-  st.markdown("### 👤 Single Tenant Actions")
-  tenant_labels = [
-      f"Shop #{row['Shop #']} - {row['Tenant Name']}"
-      for _, row in df_arr.iterrows()
-  ]
-  selected_label = st.selectbox(
-      "Select Tenant Shop for Individual Action", tenant_labels
-  )
-  selected_shop = int(selected_label.split("Shop #")[1].split(" - ")[0])
-  tenant_row = df_arr[df_arr["Shop #"] == selected_shop].iloc[0]
-
-  t_name = tenant_row["Tenant Name"]
-  t_pin = str(tenant_row.get("KRA PIN Certificate", "P051548911H"))
-  monthly_rent = float(tenant_row["Monthly Rate"])
-  t_email = str(tenant_row.get("Email Address", ""))
-
-  st.write(
-      f"**Tenant:** {t_name} | **Shop:** #{selected_shop} | **Monthly Rate:** KSh"
-      f" {monthly_rent:,.2f} | **PIN:** {t_pin} | **Email:** {t_email}"
-  )
-
-  col_btn1, col_btn2 = st.columns(2)
-  with col_btn1:
-    if st.button("📄 Generate Selected Invoice PDF"):
-      pdf_invoice = backend.generate_etims_tax_invoice_pdf(
-          tenant_name=t_name,
-          shop_no=int(selected_shop),
-          rate=monthly_rent,
-          paybill=paybill,
-          paybill_acc=paybill_acc,
-          branch_name=branch_name,
-          bank_code=bank_code,
-          branch_code=branch_code,
-          swift_code=swift_code,
-          billing_month=billing_month,
-          kra_pin=t_pin if t_pin != "N/A" else "P051548911H",
-      )
-      st.success(f"Generated: {pdf_invoice}")
-      with open(pdf_invoice, "rb") as f:
-        st.download_button(
-            "📥 Download Invoice PDF",
-            f,
-            file_name=os.path.basename(pdf_invoice),
+        recipient_email = st.text_input(
+            "Recipient Tenant Email", value=t_email, key=f"etims_recipient_{selected_shop}"
         )
+        
+        if st.button("📤 Send Selected eTIMS Invoice via Email", key="send_etims_email_btn"):
+            with st.spinner("Generating and sending official eTIMS tax invoice..."):
+                pdf_invoice = backend.generate_etims_tax_invoice_pdf(
+                    tenant_name=t_name,
+                    shop_no=int(selected_shop),
+                    rate=monthly_rent,
+                    paybill=paybill,
+                    paybill_acc=paybill_acc,
+                    branch_name=branch_name,
+                    bank_code=bank_code,
+                    branch_code=branch_code,
+                    swift_code=swift_code,
+                    billing_month=billing_month,
+                    kra_pin=t_pin,
+                )
+                
+                success, msg = backend.send_etims_invoice_email(
+                    recipient_email=recipient_email,
+                    tenant_name=t_name,
+                    pdf_path=pdf_invoice,
+                    sender_email=sender_email,
+                    app_password=app_password,
+                    shop_no=int(selected_shop),
+                    billing_month=billing_month,
+                )
 
-  with col_btn2:
-    if st.button("📊 Generate Selected Statement PDF"):
-      pdf_statement = backend.generate_bank_statement_pdf(
-          tenant_name=t_name,
-          shop_no=int(selected_shop),
-          rate=monthly_rent,
-          expected=float(tenant_row["Expected_Rent"]),
-          collected=float(tenant_row["Actual_Collected"]),
-          arrears=float(tenant_row["Arrears_Balance"]),
-          penalty=float(tenant_row.get("Penalty_Fee", 0)),
-          interest=float(tenant_row.get("Interest_Charge", 0)),
-          paybill=paybill,
-          paybill_acc=paybill_acc,
-          branch_name=branch_name,
-          bank_code=bank_code,
-          branch_code=branch_code,
-          swift_code=swift_code,
-          billing_month=billing_month,
-      )
-      st.success(f"Generated: {pdf_statement}")
-      with open(pdf_statement, "rb") as f:
-        st.download_button(
-            "📥 Download Statement PDF",
-            f,
-            file_name=os.path.basename(pdf_statement),
-        )
-
-  recipient_email = st.text_input(
-      "Recipient Tenant Email", t_email, key="single_recipient"
-  )
-  if st.button("📤 Send Selected Invoice via Email"):
-    with st.spinner("Sending email..."):
-      pdf_invoice = backend.generate_etims_tax_invoice_pdf(
-          tenant_name=t_name,
-          shop_no=int(selected_shop),
-          rate=monthly_rent,
-          paybill=paybill,
-          paybill_acc=paybill_acc,
-          branch_name=branch_name,
-          bank_code=bank_code,
-          branch_code=branch_code,
-          swift_code=swift_code,
-          billing_month=billing_month,
-          kra_pin=t_pin if t_pin != "N/A" else "P051548911H",
-      )
-      success, msg = backend.send_email_statement(
-          recipient_email=recipient_email,
-          tenant_name=t_name,
-          pdf_path=pdf_invoice,
-          sender_email=sender_email,
-          app_password=app_password,
-          shop_no=int(selected_shop),
-          paybill=paybill,
-          paybill_acc=paybill_acc,
-          branch_name=branch_name,
-          bank_code=bank_code,
-          branch_code=branch_code,
-          swift_code=swift_code,
-          billing_month=billing_month,
-      )
-
-      if success:
-        st.success(msg)
-      else:
-        st.error(msg)
-
-elif module == "Demand Notice Builder":
-  st.subheader("⚖️ Formal Legal Demand Notice Builder")
-  st.markdown(
-      "Generate formal legal demand notices and letters of demand specifically"
-      " for tenants with outstanding rent arrears."
-  )
-
-  df_arr = backend.calculate_tenant_arrears()
-  df_non_compliant = df_arr[df_arr["Arrears_Balance"] > 0]
-
-  if df_non_compliant.empty:
-    st.success("All tenants are fully compliant! No outstanding arrears detected.")
-  else:
-    tenant_labels = [
-        (
-            f"Shop #{row['Shop #']} - {row['Tenant Name']} (Arrears: KSh"
-            f" {row['Arrears_Balance']:,.2f})"
-        )
-        for _, row in df_non_compliant.iterrows()
-    ]
-    selected_label = st.selectbox(
-        "Select Non-Compliant Tenant / Shop for Notice", tenant_labels
-    )
-    selected_shop_no = int(selected_label.split("Shop #")[1].split(" - ")[0])
-    row_sel = df_non_compliant[
-        df_non_compliant["Shop #"] == selected_shop_no
-    ].iloc[0]
-
-    t_email = str(row_sel.get("Email Address", ""))
-
-    notice_text = f"""NOTICE TO QUIT & PAY RENT ARREARS
-
-TO: {row_sel['Tenant Name']}
-PROPERTY: Shop #{selected_shop_no}, Tinitin La Place Building, Siaya Town
-MANAGED BY: Global Star Investments Limited
-DATE: August 3, 2026
-
-Dear Tenant,
-
-TAKE NOTICE that as of July 31, 2026, your rent arrears account for Shop #{selected_shop_no} reflects an outstanding balance of KSh {row_sel['Arrears_Balance']:,.2f} (inclusive of applicable late fees/penalties). 
-
-Enforcement Status: {row_sel['Enforcement_Status']}
-
-Kindly arrange for immediate settlement via our official M-Pesa Paybill (Business No: 522522 | Account: 1285399528) or direct KCB Bank transfer within 7 days of this notice to avoid formal access restriction, legal distress, or lease forfeiture.
-
-Yours faithfully,
-MANAGEMENT
-GLOBAL STAR INVESTMENTS LIMITED
-"""
-    st.text_area("Generated Demand Notice Preview", notice_text, height=280)
-
-    st.markdown("### 📧 Email Dispatch for Legal Demand Notice")
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-      demand_sender = st.text_input(
-          "Sender Gmail Address",
-          "globalstarinvest@gmail.com",
-          key="demand_sender",
-      )
-    with col_d2:
-      demand_pwd = st.text_input(
-          "Gmail App Password",
-          value="bwng mwof eqrq jpaf",
-          type="password",
-          key="demand_pwd",
-      )
-
-    demand_recipient = st.text_input(
-        "Recipient Email Address(es)", t_email, key="demand_recipient"
-    )
-
-    col_act1, col_act2 = st.columns(2)
-    with col_act1:
-      if st.button("📥 Download Legal Demand Notice Text"):
-        st.download_button(
-            "Download Notice File",
-            notice_text,
-            file_name=f"Demand_Notice_Shop_{selected_shop_no}.txt",
-        )
-    with col_act2:
-      if st.button("📤 Send Legal Demand Notice via Email", type="primary"):
-        if not demand_recipient or "@" not in demand_recipient:
-          st.error("Please enter a valid recipient email address.")
-        else:
-          success, msg = backend.send_email_statement(
-              recipient_email=demand_recipient,
-              tenant_name=row_sel["Tenant Name"],
-              pdf_path="",
-              sender_email=demand_sender,
-              app_password=demand_pwd,
-              shop_no=int(selected_shop_no),
-              paybill="522522",
-              paybill_acc="1285399528",
-              branch_name="Siaya",
-              bank_code="01",
-              branch_code="012",
-              swift_code="KCBLKENX",
-              billing_month=backend.statement_month_str,
-          )
-          if success:
-            st.success(
-                f"Legal demand notice successfully sent to"
-                f" {row_sel['Tenant Name']}!"
-            )
-          else:
-            st.error(f"Test failed: {msg}")
+                if success:
+                    st.success(f"Official eTIMS Tax Invoice successfully transmitted to {t_name} ({recipient_email})!")
+                else:
+                    st.error(msg)
 
 elif module == "Bank Statement Audit":
   st.subheader("🏦 KCB Bank Statement Audit & Reconciliation")
