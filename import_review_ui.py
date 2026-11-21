@@ -188,12 +188,23 @@ def show_import_review():
                                     allowed_categories,
                                     index=allowed_categories.index(default_category) if default_category in allowed_categories else 0,
                                     format_func=lambda k: CATEGORIES[k])
-            decision = st.selectbox("Decision", list(DECISIONS), format_func=lambda k: DECISIONS[k])
+            decision = st.selectbox(
+                "Decision", list(DECISIONS), index=None,
+                placeholder="Select a decision after checking the evidence",
+                format_func=lambda k: DECISIONS[k])
+            verified = st.checkbox(
+                "I checked this row against the statement and existing accounts; "
+                "I understand approval does not import the entry.",
+                value=False)
             reason = st.text_area("Reason / explanation (mandatory)")
             evidence = st.text_input("Supporting document / reconciliation reference (recommended)")
             submitted = st.form_submit_button("Record approval decision", disabled=not can_approve)
         if submitted:
-            if not reason.strip():
+            if not decision:
+                st.error("Select a review decision.")
+            elif not verified:
+                st.error("Confirm you checked this row against the existing accounts.")
+            elif not reason.strip():
                 st.error("Provide a reason before recording a decision.")
             elif decision == "approved_import" and item.get("movement_direction") == "non_movement":
                 st.error("Balance brought forward is not a bank transaction.")
