@@ -5,3 +5,5 @@ reportlab
 qrcode
 pypdf
 requests
+supabase>=2,<3
+python-dotenv>=1,<2
