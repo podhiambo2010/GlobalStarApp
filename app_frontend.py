@@ -56,8 +56,28 @@ if uploaded_bank_file is not None and _workbook_category(uploaded_bank_file) != 
     st.stop()
 
 
-tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
-bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
+# TenantPortalBackend uses os.path.exists() and expects filesystem paths,
+# not Streamlit UploadedFile objects. Keep uploads in a temporary session directory.
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+if "_v1_excel_tmp_dir" not in st.session_state:
+    st.session_state["_v1_excel_tmp_dir"] = TemporaryDirectory(prefix="globalstar-v1-")
+_session_dir = Path(st.session_state["_v1_excel_tmp_dir"].name)
+
+def _excel_file_path(upload, kind, fallback):
+    if upload is None:
+        return fallback
+    content = upload.getvalue()
+    digest = hashlib.sha256(content).hexdigest()
+    path = _session_dir / f"{kind}_{digest}.xlsx"
+    if not path.is_file():
+        path.write_bytes(content)
+    return str(path)
+
+tenant_path = _excel_file_path(uploaded_tenant_file, "tenants", "Tenants_Details.xlsx")
+bank_path = _excel_file_path(uploaded_bank_file, "bank", "KCB_Bank_Statement.xlsx")
 
 if not os.path.exists("Tenants_Details.xlsx") and uploaded_tenant_file is None:
     st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
