@@ -115,6 +115,7 @@ class TenantPortalBackend:
 
     def generate_kra_compliance_summary_pdf(self, output_path: str = "KRA_Sandbox_Integration_Summary.pdf") -> str:
         """Generates a formal technical compliance and architecture summary PDF for KRA eTIMS certification review."""
+        raise RuntimeError("Unverified KRA certification summary disabled in Excel-only V1.")
         doc = SimpleDocTemplate(output_path, pagesize=letter, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
         styles = getSampleStyleSheet()
         elements = []
@@ -640,6 +641,7 @@ class TenantPortalBackend:
         return unmapped[cols_to_show]
 
     def generate_etims_tax_invoice_pdf(self, tenant_name: str, shop_no: int, rate: float, paybill: str, paybill_acc: str, branch_name: str, bank_code: str, branch_code: str, swift_code: str, billing_month: str = "July 2026", base_filename: str = None, kra_pin: str = "P051548911H", etims_env: str = "Sandbox (Testing)"):
+        raise RuntimeError("Official eTIMS invoice PDF generation disabled: no verified KRA integration.")
         parts = billing_month.split()
         month_name = parts[0] if len(parts) > 0 else "General"
         year_name = parts[1] if len(parts) > 1 else str(datetime.now().year)
