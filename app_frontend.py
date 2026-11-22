@@ -27,91 +27,42 @@ st.sidebar.markdown("---")
 uploaded_tenant_file = st.sidebar.file_uploader("Upload Tenants Details (Excel)", type=["xlsx"])
 uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx"])
 
-# Shared source for every page; never ask the user to upload the same workbook again
-# while this Streamlit browser session is active. Files are temporary and isolated
-# from GitHub, Supabase and the production transaction tables.
-import hashlib
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-if "_gsil_workbook_dir" not in st.session_state:
-    st.session_state["_gsil_workbook_dir"] = TemporaryDirectory(prefix="gsil-session-")
-workbook_dir = Path(st.session_state["_gsil_workbook_dir"].name)
-
-for kind, upload in (("tenant", uploaded_tenant_file), ("bank", uploaded_bank_file)):
-    if upload is not None:
-        contents = upload.getvalue()
-        checksum = hashlib.sha256(contents).hexdigest()
-        if st.session_state.get(f"gsil_{kind}_upload_sha256") != checksum:
-            st.session_state[f"gsil_{kind}_upload_bytes"] = contents
-            st.session_state[f"gsil_{kind}_upload_name"] = upload.name
-            st.session_state[f"gsil_{kind}_upload_sha256"] = checksum
-
-def _session_workbook_path(kind, fallback):
-    contents = st.session_state.get(f"gsil_{kind}_upload_bytes")
-    checksum = st.session_state.get(f"gsil_{kind}_upload_sha256")
-    if contents is None or not checksum:
-        return fallback
-    path = workbook_dir / f"{kind}_{checksum[:24]}.xlsx"
-    if not path.exists():
-        path.write_bytes(contents)
-    return str(path)
-
-tenant_path = _session_workbook_path("tenant", "Tenants_Details.xlsx")
-bank_path = _session_workbook_path("bank", "KCB_Bank_Statement.xlsx")
-
-if not os.path.exists(tenant_path):
-    st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
-if not os.path.exists(bank_path):
-    st.warning("⚠️ Please upload your `KCB_Bank_Statement.xlsx` file using the sidebar.")
-
-if st.session_state.get("gsil_bank_upload_name"):
-    st.sidebar.caption(
-        f"Active bank source: {st.session_state['gsil_bank_upload_name']} — "
-        "shared with Cumulative Bank Updates. Upload only once per session."
-    )
-if st.session_state.get("gsil_tenant_upload_name"):
-    st.sidebar.caption(
-        f"Active tenant source: {st.session_state['gsil_tenant_upload_name']}."
-    )
-
-def _inspect_workbook_kind(path):
-    """Identify workbook by column headings rather than filenames."""
+# Validate source file type before initializing the Excel-based reporting engine.
+# V1 does not send or store workbooks in a database.
+from io import BytesIO
+def _workbook_category(upload):
+    if upload is None:
+        return None
     try:
-        with pd.ExcelFile(path) as book:
-            for sheet in book.sheet_names:
+        with pd.ExcelFile(BytesIO(upload.getvalue())) as workbook:
+            for tab in workbook.sheet_names:
                 for header in (0, 14):
-                    columns = {str(col).strip().lower() for col in
-                               pd.read_excel(book, sheet_name=sheet, header=header, nrows=0).columns}
-                    if {"transaction date", "money in", "money out", "bank reference number"}.issubset(columns):
+                    cols = {str(col).strip().casefold() for col in
+                            pd.read_excel(workbook, sheet_name=tab, header=header, nrows=0).columns}
+                    if {"transaction date", "money in", "money out", "bank reference number"} <= cols:
                         return "bank"
-                    if {"tenant name", "monthly rate"}.issubset(columns) and (
-                        "shop / unit #" in columns or "shop #" in columns
-                    ):
-                        return "tenant"
-        return "unrecognized"
+                    if {"tenant name", "monthly rate"} <= cols and (
+                            "shop / unit #" in cols or "shop #" in cols):
+                        return "tenants"
     except Exception:
-        return "unreadable"
+        return "invalid"
+    return "unknown"
+
+if uploaded_tenant_file is not None and _workbook_category(uploaded_tenant_file) != "tenants":
+    st.error("The first upload must be the Tenant Details workbook. Check the selected file.")
+    st.stop()
+if uploaded_bank_file is not None and _workbook_category(uploaded_bank_file) != "bank":
+    st.error("The second upload must be the KCB Bank Statement workbook. Check the selected file.")
+    st.stop()
 
 
-if os.path.exists(tenant_path) and os.path.exists(bank_path):
-    actual_tenant_kind = _inspect_workbook_kind(tenant_path)
-    actual_bank_kind = _inspect_workbook_kind(bank_path)
-    if actual_tenant_kind == "bank" and actual_bank_kind == "tenant":
-        st.error(
-            "The two files are reversed. Upload Tenants Details into the first "
-            "field and KCB Bank Statement into the second field. No database import occurred."
-        )
-        st.stop()
-    if actual_tenant_kind != "tenant" or actual_bank_kind != "bank":
-        st.error(
-            "Workbook validation failed before accounting calculations. "
-            f"First field detected: {actual_tenant_kind}; second field detected: {actual_bank_kind}. "
-            "Confirm that the tenant file contains Tenant Name and Monthly Rate, and "
-            "the bank file contains Transaction Date, Money In, Money Out and Bank Reference Number. "
-            "No database import occurred."
-        )
-        st.stop()
+tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
+bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
+
+if not os.path.exists("Tenants_Details.xlsx") and uploaded_tenant_file is None:
+    st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
+if not os.path.exists("KCB_Bank_Statement.xlsx") and uploaded_bank_file is None:
+    st.warning("⚠️ Please upload your `KCB_Bank_Statement.xlsx` file using the sidebar.")
 
 @st.cache_resource
 def get_backend(t_path, b_path):
@@ -120,10 +71,10 @@ def get_backend(t_path, b_path):
         bank_excel_path=b_path,
     )
 
-if os.path.exists(tenant_path) and os.path.exists(bank_path):
+if (os.path.exists("Tenants_Details.xlsx") or uploaded_tenant_file is not None) and \
+   (os.path.exists("KCB_Bank_Statement.xlsx") or uploaded_bank_file is not None):
     backend = get_backend(tenant_path, bank_path)
 else:
-    st.info("Use the original sidebar to upload both workbooks; Cumulative Bank Updates reuses the bank file.")
     st.stop()
 
 st.sidebar.markdown("## Global Star Portal")
@@ -240,49 +191,16 @@ elif module == "Unmapped Payment Auditor":
 
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
-    st.markdown("Displaying active lease agreements, terms, and extracted billing cycles synchronized directly from Supabase production database.")
-
-    try:
-        leases_res = backend.supabase.table("leases").select(
-            "id, start_date, end_date, billing_cycle, status, units(unit_number, monthly_rent, is_occupied), tenants(full_name, email, phone_number)"
-        ).execute()
-        
-        leases_data = leases_res.data
-        if leases_data:
-            formatted_leases = []
-            for l in leases_data:
-                unit_info = l.get("units") or {}
-                tenant_info = l.get("tenants") or {}
-                
-                end_date_str = l.get("end_date")
-                status = l.get("status", "Active")
-                
-                if end_date_str:
-                    try:
-                        end_dt = datetime.strptime(str(end_date_str)[:10], "%Y-%m-%d")
-                        if end_dt < datetime.now():
-                            status = "Expired"
-                        else:
-                            status = "Active"
-                    except:
-                        pass
-
-                formatted_leases.append({
-                    "Shop #": unit_info.get("unit_number", "N/A"),
-                    "Tenant Name": tenant_info.get("full_name", "Unknown"),
-                    "Monthly Rent (KSh)": unit_info.get("monthly_rent", 0.0),
-                    "Billing Cycle": l.get("billing_cycle", "Monthly"),
-                    "Lease Start": l.get("start_date"),
-                    "Lease End": end_date_str,
-                    "Status": status
-                })
-            
-            df_leases_display = pd.DataFrame(formatted_leases)
-            st.dataframe(df_leases_display, width="stretch")
-        else:
-            st.info("No active lease records found in Supabase.")
-    except Exception as e:
-        st.error(f"Could not load leases from Supabase: {e}")
+    st.markdown("Lease overview from the uploaded tenant workbook. This view does not read or update any database.")
+    tenant_cols = [
+        name for name in ("Shop / Unit #", "Tenant Name", "Monthly Rate",
+                          "Lease Date", "Calculated_Lease_End", "Calculated_Status")
+        if name in backend.df_tenants.columns
+    ]
+    if tenant_cols:
+        st.dataframe(backend.df_tenants[tenant_cols], width="stretch", hide_index=True)
+    else:
+        st.info("No lease details found in the uploaded tenant workbook.")
 
     st.markdown("---")
     st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
@@ -329,8 +247,10 @@ elif module == "Lease PDF AI Extractor & Alerts":
             else:
                 st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
 
-        if st.button("Register / Update All Extracted Tenants"):
-            st.success("All tenants successfully profiled and synchronized with Supabase records!")
+        st.info(
+            "OCR and master verification are preview-only in the Excel-based V1. "
+            "To update tenants, revise the source workbook and upload it again."
+        )
 
     if st.button("Clear All Reassignment Overrides"):
         if os.path.exists("reassignments.json"):
