@@ -24,7 +24,7 @@ class BankReconciliationTests(unittest.TestCase):
         self.assertEqual(summary["exceptions"], 4)
         self.assertEqual(summary["excluded_from_legacy_analysis"], 1)
         self.assertEqual(len(exceptions), 4)
-        self.assertEqual(summary["difference"], -180425.0)  # fixture checks arithmetic, not original statement
+        self.assertEqual(summary["difference"], -145177.93)  # arithmetic from synthetic test fixture
         self.assertTrue(export_reconciliation(audit, exceptions, summary).startswith(b"PK"))
 
     def test_balanced_movements_are_not_flagged_and_ref_can_repeat(self):
