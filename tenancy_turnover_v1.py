@@ -1,5 +1,6 @@
 """Excel-only tenancy ledger. No database writes or inferred move-out dates."""
 import calendar
+import hashlib
 import re
 
 import pandas as pd
@@ -44,12 +45,18 @@ def tenancy_register(df, period_start, period_end):
     df["End_Actual"] = pd.to_datetime(df["Lease End Date"], errors="coerce")
     df["Tenancy_Status"] = df["Tenancy Record Status"].fillna("").astype(str).str.strip().str.casefold()
     df["Rent_Rate"] = pd.to_numeric(df["Monthly Rate"], errors="coerce").fillna(0)
-    df["Tenancy_ID"] = [
-        f"{str(int(unit)) if pd.notna(unit) else 'UNKNOWN'}:{start.strftime('%Y%m%d') if pd.notna(start) else 'NO_START'}:{i}"
-        for i, (unit, start) in enumerate(zip(df["Shop #"], df["Lease_Date_Parsed"]), start=2)
-    ]
+    # Stable across workbook sorting; an exact duplicate remains review-required.
+    def stable_id(row):
+        unit = str(int(row["Shop #"])) if pd.notna(row["Shop #"]) else "UNKNOWN"
+        start = row["Lease_Date_Parsed"]
+        day = start.strftime("%Y%m%d") if pd.notna(start) else "NO_START"
+        name = " ".join(str(row["Tenant Name"]).upper().split())
+        digest = hashlib.sha256(f"{unit}|{day}|{name}".encode("utf-8")).hexdigest()[:12]
+        return f"{unit}:{day}:{digest}"
+    df["Tenancy_ID"] = df.apply(stable_id, axis=1)
     valid = {"current", "former", "vacancy"}
-    df["Review_Required"] = (~df["Tenancy_Status"].isin(valid)
+    df["Review_Required"] = (df["Tenancy_ID"].duplicated(keep=False)
+        | ~df["Tenancy_Status"].isin(valid)
         | (df["Tenancy_Status"] != "vacancy") & df["Lease_Date_Parsed"].isna()
         | (df["Tenancy_Status"] == "former") & df["End_Actual"].isna()
         | (df["Tenancy_Status"] == "current") & df["End_Actual"].notna())
