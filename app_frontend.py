@@ -82,14 +82,15 @@ if module == "Dashboard & Arrears":
         c1.metric("Current tenant records", current_count)
         c2.metric("Former tenant records", former_count)
         c3.metric("Expected period rent", f"KSh {register['Expected_Rent'].sum():,.2f}")
-        c4.metric("Credits needing review", pending_count)
+        c4.metric("Credits needing review", int(credits["Allocation_Status"].isin(["Review required", "Legacy decision: reverify", "Stale tenancy assignment: reverify", "Pending (reviewed)"]).sum()))
         st.caption(
+            "Verified collections include only reviewed tenancy-specific assignments. Suggested matches remain provisional. "
             "Vacancies are not billed. Future tenancies are not billed before their commencement. "
             "A former occupant's end date stops further accrual, without erasing historical records."
         )
         cols = ["Shop #", "Tenancy_ID", "Tenant Name", "Tenancy_Status",
                 "Report_Status", "Lease_Date_Parsed", "End_Actual", "Rent_Rate",
-                "Expected_Rent", "Actual_Collected", "Period_Difference", "Review_Required"]
+                "Expected_Rent", "Actual_Collected", "Provisional_Credits", "Period_Difference", "Review_Required"]
         st.dataframe(register[cols], width="stretch", hide_index=True)
         st.warning(
             "Opening balances, security deposits, unapplied payments and bank credits "
@@ -117,14 +118,71 @@ elif module == "Deposit & Lease Ledger":
     total_leases = len(df_dep)
     total_deposit_liability = pd.to_numeric(df_dep['Deposit (KSh)'], errors='coerce').sum()
     if {'Tenancy Record Status', 'Lease End Date'}.issubset(df_dep.columns):
-        st.warning("Deposit figures are workbook amounts, not verified outstanding liabilities. Former-tenant settlement/refunds must be reconciled.")
+        st.warning("Deposit figures are historical workbook amounts, not verified liabilities. Former-tenant refunds and settlements must be reconciled before relying on totals.")
     
     col1, col2 = st.columns(2)
     col1.metric("Total Lease Records", total_leases)
-    col2.metric("Total Deposit Liabilities", f"KSh {total_deposit_liability:,.2f}")
+    col2.metric("Deposits Recorded (Unverified)", f"KSh {total_deposit_liability:,.2f}")
     st.markdown("---")
 
     st.dataframe(df_dep[['Shop / Unit #', 'Tenant Name', 'Lease Date', 'Deposit (KSh)', 'Deposit_Timing', 'Lease_Type']], width='stretch')
+
+elif module == "Unmapped Payment Auditor":
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.subheader("🔍 Bank Credit Review — Individual Tenancies")
+        register, credits = backend.tenancy_turnover_report()
+        st.info("Decisions are recorded per original bank row, not per shared reference. Existing shop-based reviews are retained as legacy history.")
+        st.warning("Do not classify deposits, owner transfers, duplicate/reversed credits or unidentified receipts as rent without documentary support.")
+        reviewable = credits.copy()
+        counts = reviewable["Allocation_Status"].value_counts()
+        st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
+        display_cols = [x for x in ["Bank_Row_ID", "Transaction Date", "Transaction Details",
+            "Money In Num", "Ref_Clean", "Allocation_Status", "Legacy_Decision",
+            "Tenancy_ID"] if x in reviewable.columns]
+        st.dataframe(reviewable[display_cols], width="stretch", hide_index=True)
+        if not reviewable.empty:
+            options = reviewable["Bank_Row_ID"].tolist()
+            selected_id = st.selectbox("Select exact bank row", options,
+                format_func=lambda rid: (
+                    f"{str(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Transaction Date'].iloc[0])} | "
+                    f"KSh {float(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Money In Num'].iloc[0]):,.2f} | "
+                    f"{rid} | "
+                    f"{str(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Transaction Details'].iloc[0])[:75]}"
+                ), key="turnover_row_selector")
+            picked = reviewable[reviewable["Bank_Row_ID"] == selected_id].iloc[0]
+            st.caption(f"Selected reference: {picked.get('Ref_Clean', '')} — Row ID: {selected_id}")
+            st.caption(f"Current classification: {picked['Allocation_Status']}")
+            decision_label = st.radio("Review decision",
+                ["Pending further evidence", "Assign to a specific tenancy", "Exclude from rental allocations"],
+                key="turnover_action")
+            eligible = register[(~register["Review_Required"]) &
+                (register["Tenancy_Status"] != "vacancy")].copy()
+            chosen_tenancy = None
+            if decision_label == "Assign to a specific tenancy":
+                tenancy_options = eligible["Tenancy_ID"].astype(str).tolist()
+                chosen_tenancy = st.selectbox("Select individual tenancy", tenancy_options,
+                    format_func=lambda tid: (
+                        f"{eligible.loc[eligible['Tenancy_ID'] == tid, 'Shop #'].iloc[0]} — "
+                        f"{eligible.loc[eligible['Tenancy_ID'] == tid, 'Tenant Name'].iloc[0]} "
+                        f"({tid})"
+                    ))
+                st.warning("Confirm this payment belongs to the selected tenancy and is rental income before saving.")
+            reason = st.text_input("Evidence / reason for decision",
+                placeholder="e.g., verified rent receipt, deposit, bank reversal, unconfirmed payer")
+            confirm = st.checkbox("I checked the transaction description and supporting records",
+                key="turnover_confirm")
+            if st.button("Save bank-row review", type="primary", disabled=not confirm or not reason.strip()):
+                decision = {"Pending further evidence": "pending",
+                    "Assign to a specific tenancy": "assign",
+                    "Exclude from rental allocations": "exclude"}[decision_label]
+                try:
+                    backend.save_tenancy_bank_review(selected_id, decision, chosen_tenancy, reason)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Decision recorded against this bank row only.")
+                    st.rerun()
+        st.stop()
 
 elif module == "Unmapped Payment Auditor":
   st.subheader("🔍 Unmapped Payment Auditor")
