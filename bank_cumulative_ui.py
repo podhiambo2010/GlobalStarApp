@@ -209,13 +209,21 @@ def show_cumulative_bank_updates():
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Review could not be recorded: {exc}")
-    st.subheader("Compare new annual statement")
-    upload = st.file_uploader("Bank statement (.xlsx)", type=["xlsx"], key="rolling_bank_excel")
-    if upload is None:
-        st.caption("Select your latest KCB workbook. The initial comparison makes no database changes.")
+    st.subheader("Compare uploaded bank statement")
+    # The original app_frontend sidebar is the sole workbook upload location.
+    # Uploaded bytes are copied to a stable, non-widget Streamlit session key.
+    blob = st.session_state.get("gsil_bank_upload_bytes")
+    filename = st.session_state.get("gsil_bank_upload_name")
+    if not blob or not filename:
+        st.warning(
+            "No bank workbook has been uploaded in this session. Open 'app frontend', "
+            "upload the KCB Bank Statement once in its sidebar, then return here. "
+            "Do not upload a second copy on this page."
+        )
+        st.page_link("app_frontend.py", label="Open original Data Upload & Portal Setup")
         return
-    blob = upload.getvalue()
     file_sha = hashlib.sha256(blob).hexdigest()
+    st.success(f"Using the original app frontend upload: {filename}")
     if any(b["file_sha256"] == file_sha for b in batches):
         st.warning("This exact workbook was already staged. The file will not be imported twice.")
         return
@@ -256,7 +264,7 @@ def show_cumulative_bank_updates():
             cleaned = [{k: v for k, v in row.items() if k != "excel_row"} for row in rows]
             result = sb.rpc("stage_rolling_bank_statement", {
                 "p_organization_id": ORG,
-                "p_filename": upload.name,
+                "p_filename": filename,
                 "p_file_sha256": file_sha,
                 "p_rows": cleaned,
             }).execute().data
