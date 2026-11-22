@@ -66,33 +66,49 @@ module = st.sidebar.radio(
 )
 
 if module == "Dashboard & Arrears":
-  st.subheader(
-      f"🏢 Portfolio Dashboard & Tenant Arrears ({backend.statement_month_str})"
-  )
-  df_arr = backend.calculate_tenant_arrears()
-
-  col1, col2, col3, col4 = st.columns(4)
-  col1.metric("Total Active Tenants", len(df_arr))
-  col2.metric("Total Expected Rent", f"KSh {df_arr['Expected_Rent'].sum():,.2f}")
-  col3.metric(
-      "Total Actual Collected", f"KSh {df_arr['Actual_Collected'].sum():,.2f}"
-  )
-  col4.metric(
-      "Total Outstanding Arrears", f"KSh {df_arr['Arrears_Balance'].sum():,.2f}"
-  )
-
-  st.dataframe(
-      df_arr[[
-          "Shop #",
-          "Tenant Name",
-          "Monthly Rate",
-          "Expected_Rent",
-          "Actual_Collected",
-          "Arrears_Balance",
-          "Enforcement_Status",
-      ]],
-      width="stretch",
-  )
+    st.subheader(f"🏢 Portfolio Dashboard — Tenancy History ({backend.statement_month_str})")
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        register, credits = backend.tenancy_turnover_report()
+        st.info(
+            f"Excel-only tenancy history. Reporting period: "
+            f"{backend.statement_start_date:%d %b %Y} to "
+            f"{backend.statement_end_date:%d %b %Y}. "
+            "These are period figures, NOT confirmed lifetime arrears."
+        )
+        current_count = int((register["Report_Status"] == "Current").sum())
+        former_count = int((register["Tenancy_Status"] == "former").sum())
+        pending_count = int((credits["Allocation_Status"] == "Review required").sum())
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Current tenant records", current_count)
+        c2.metric("Former tenant records", former_count)
+        c3.metric("Expected period rent", f"KSh {register['Expected_Rent'].sum():,.2f}")
+        c4.metric("Credits needing review", pending_count)
+        st.caption(
+            "Vacancies are not billed. Future tenancies are not billed before their commencement. "
+            "A former occupant's end date stops further accrual, without erasing historical records."
+        )
+        cols = ["Shop #", "Tenancy_ID", "Tenant Name", "Tenancy_Status",
+                "Report_Status", "Lease_Date_Parsed", "End_Actual", "Rent_Rate",
+                "Expected_Rent", "Actual_Collected", "Period_Difference", "Review_Required"]
+        st.dataframe(register[cols], width="stretch", hide_index=True)
+        st.warning(
+            "Opening balances, security deposits, unapplied payments and bank credits "
+            "require reconciliation. Period Difference is not an enforceable arrears balance."
+        )
+        if not credits.empty:
+            with st.expander("Bank credits — identified provisionally or awaiting allocation"):
+                cols_credits = [c for c in ["Transaction Date", "Transaction Details",
+                                           "Money In Num", "Ref_Clean", "Allocation_Status",
+                                           "Tenancy_ID"] if c in credits.columns]
+                st.dataframe(credits[cols_credits], width="stretch", hide_index=True)
+        if register["Review_Required"].any():
+            st.error(f"{int(register['Review_Required'].sum())} tenancy record(s) require clarification.")
+    else:
+        st.error(
+            "This workbook lacks Tenancy Record Status and Lease End Date. "
+            "Upload the reviewed tenancy-history workbook; old shop-based figures "
+            "are not reliable when tenants have changed."
+        )
 
 elif module == "Deposit & Lease Ledger":
     st.subheader("📋 Deposit & Lease Ledger")
@@ -100,6 +116,8 @@ elif module == "Deposit & Lease Ledger":
     
     total_leases = len(df_dep)
     total_deposit_liability = pd.to_numeric(df_dep['Deposit (KSh)'], errors='coerce').sum()
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(df_dep.columns):
+        st.warning("Deposit figures are workbook amounts, not verified outstanding liabilities. Former-tenant settlement/refunds must be reconciled.")
     
     col1, col2 = st.columns(2)
     col1.metric("Total Lease Records", total_leases)
@@ -226,6 +244,15 @@ elif module == "Lease PDF AI Extractor & Alerts":
         st.rerun()
 
 elif module == "Arrears Payment Reminders":
+    # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.warning(
+            "This action is disabled in V1 tenancy-history mode. Current period "
+            "calculations are provisional until tenancy-level bank allocations, "
+            "opening balances, and contractual terms have been verified."
+        )
+        st.stop()
+
     st.subheader("📢 Arrears Payment Reminders & Friendly Notices")
     st.markdown(
         "Send polite payment reminders and overdue notices to non-compliant "
@@ -621,6 +648,15 @@ Tel: +254 723 562 286
                     st.success(f"Successfully dispatched bulk SMS reminders to {sms_success_count} out of {total_nc} tenants!")
 
 elif module == "eTIMS Tax Invoices & Bank Statements":
+    # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.warning(
+            "This action is disabled in V1 tenancy-history mode. Current period "
+            "calculations are provisional until tenancy-level bank allocations, "
+            "opening balances, and contractual terms have been verified."
+        )
+        st.stop()
+
     st.subheader("🧾 eTIMS Tax Invoices & Automated Monthly Billing")
     st.markdown(
         "Generate official KRA eTIMS tax invoices exclusively for compliant tenants who have fully settled their rent."
