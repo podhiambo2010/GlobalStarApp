@@ -105,6 +105,7 @@ module = st.sidebar.radio(
         "Dashboard & Arrears",
         "Deposit & Lease Ledger",
         "Unmapped Payment Auditor",
+        "Tenant Payment Allocation Audit",
         "Lease PDF AI Extractor & Alerts",
         "Arrears Payment Reminders",
         "eTIMS Tax Invoices & Bank Statements",
@@ -208,6 +209,29 @@ elif module == "Unmapped Payment Auditor":
         backend.reload_master_data()
         st.success(f"Successfully ignored reference {ref_to_fix}!")
         st.rerun()
+
+elif module == "Tenant Payment Allocation Audit":
+    from tenant_allocation_review_v1 import review_excluded_credits, export_allocation_review
+    st.subheader("Tenant Payment Allocation Audit — read only")
+    st.warning("This page does not assign receipts or change tenant balances. Reconciled bank credits are not necessarily rent.")
+    review, counts = review_excluded_credits(
+        backend.df_bank_full, backend.df_bank, backend.df_tenants,
+        backend.overrides, backend.ignored_refs
+    )
+    first, second = st.columns(2)
+    first.metric("Previously excluded Money IN rows", counts["excluded_credits"])
+    second.metric("Amount needing review", f"KSh {counts['amount']:,.2f}")
+    if review.empty:
+        st.info("No previously excluded incoming transactions in the uploaded statement.")
+    else:
+        st.dataframe(review, width="stretch", hide_index=True)
+        st.caption("Suggested matches are provisional. Confirm against tenant payment history and original bank evidence before any change.")
+        st.download_button(
+            "Download READ-ONLY tenant allocation review",
+            export_allocation_review(review, counts),
+            file_name="UNVERIFIED_Tenant_Allocation_Review.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
