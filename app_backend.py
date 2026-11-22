@@ -271,9 +271,9 @@ class TenantPortalBackend:
     def reload_master_data(self):
         # Explicitly load 'Sheet1' from the workbook
         if os.path.exists(self.tenant_path):
-            xls_tenant = pd.ExcelFile(self.tenant_path)
-            tenant_sheet = 'Sheet1' if 'Sheet1' in xls_tenant.sheet_names else xls_tenant.sheet_names[0]
-            self.df_tenants = pd.read_excel(xls_tenant, sheet_name=tenant_sheet)
+            with pd.ExcelFile(self.tenant_path) as xls_tenant:
+                tenant_sheet = 'Sheet1' if 'Sheet1' in xls_tenant.sheet_names else xls_tenant.sheet_names[0]
+                self.df_tenants = pd.read_excel(xls_tenant, sheet_name=tenant_sheet)
         else:
             self.df_tenants = pd.DataFrame(columns=['Shop / Unit #', 'Tenant Name', 'Monthly Rate', 'Deposit (KSh)', 'Lease Date', 'Telephone No.', 'Email Address'])
         
@@ -425,6 +425,8 @@ class TenantPortalBackend:
                     on='Ref_Clean', 
                     how='left'
                 )
+                
+        xls.close()
 
         def is_valid_credit(row):
             ref = row['Ref_Clean']

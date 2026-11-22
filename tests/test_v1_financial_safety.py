@@ -25,7 +25,7 @@ class FinancialSafetyTests(unittest.TestCase):
 
     def test_frontend_has_no_unverified_tax_estimate_or_embedded_tokens(self):
         from pathlib import Path
-        source = (Path(__file__).resolve().parents[1] / "app_frontend.py").read_text()
+        source = (Path(__file__).resolve().parents[1] / "app_frontend.py").read_text(encoding="utf-8")
         self.assertNotIn("chargeable_income = max(0.0", source)
         self.assertNotIn("KRATK04_F7FB9", source)
         self.assertNotIn("EAASZC9", source)
