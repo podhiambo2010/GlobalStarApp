@@ -191,6 +191,9 @@ class TenantPortalBackend:
         self.statement_month_str = "July 2026"
         self.overrides = self.load_json(self.override_json_path)
         self.ignored_refs = self.load_json(self.ignored_json_path)
+        self.tenancy_review_path = "tenancy_bank_reviews_v1.json"
+        from bank_review_v1 import load_review
+        self.tenancy_reviews = load_review(self.tenancy_review_path)
         
         # Published V1 is Excel-only: never initialize or sync a database.
         self.supabase = None
@@ -397,6 +400,10 @@ class TenantPortalBackend:
         ).fillna(0)
         self.df_bank['Transaction Details'] = self.df_bank[txn_desc_col].astype(str)
         self.df_bank['Ref_Clean'] = self.df_bank[ref_col].astype(str).str.strip()
+        from bank_review_v1 import bank_row_ids
+        self.df_bank["Bank_Row_ID"] = bank_row_ids(self.df_bank)
+        # Preserve original movements and historically excluded rows for audit.
+        self.df_bank_unfiltered = self.df_bank.copy()
 
         def should_ignore(row):
             ref = row['Ref_Clean']
@@ -501,7 +508,34 @@ class TenantPortalBackend:
         if start is None or end is None:
             raise ValueError("Bank statement reporting dates are unavailable")
         register = tenancy_register(self.df_tenants, start, end)
-        return classify_credits(self.df_bank, register, self.map_transaction_to_shop, start, end)
+        # Reattach per-row bank identity and legacy decisions, without deleting movements.
+        review_bank = self.df_bank_unfiltered.copy()
+        if "Customers Name" in self.df_bank.columns:
+            linked = self.df_bank[["Bank_Row_ID", "Customers Name"]].drop_duplicates("Bank_Row_ID")
+            review_bank = review_bank.merge(linked, on="Bank_Row_ID", how="left")
+        # Validate credits against reversal rows using the existing bank parser.
+        validity = self.df_bank[["Bank_Row_ID", "Valid_Credit"]].drop_duplicates("Bank_Row_ID")
+        review_bank = review_bank.merge(validity, on="Bank_Row_ID", how="left")
+        review_bank["Valid_Credit"] = review_bank["Valid_Credit"].fillna(True)
+        return classify_credits(
+            review_bank, register, self.map_transaction_to_shop, start, end,
+            reviews=self.tenancy_reviews, old_overrides=self.overrides,
+            old_ignored=self.ignored_refs
+        )
+
+    def save_tenancy_bank_review(self, bank_row_id, decision, tenancy_id=None, reason=""):
+        from bank_review_v1 import write_review, record_decision
+        if bank_row_id not in set(self.df_bank_unfiltered["Bank_Row_ID"]):
+            raise ValueError("The selected transaction is not in the uploaded bank statement")
+        if decision == "assign":
+            from tenancy_turnover_v1 import tenancy_register
+            register = tenancy_register(self.df_tenants, self.statement_start_date, self.statement_end_date)
+            selected = register[register["Tenancy_ID"] == str(tenancy_id)]
+            if selected.empty or bool(selected.iloc[0]["Review_Required"]) or selected.iloc[0]["Tenancy_Status"] == "vacancy":
+                raise ValueError("Choose a valid individual tenancy, not a vacant or unverified record")
+        updated = record_decision(self.tenancy_reviews, bank_row_id, decision, tenancy_id, reason)
+        write_review(self.tenancy_review_path, updated)
+        self.tenancy_reviews = updated
 
     def calculate_tenant_arrears(self, current_day: int = None) -> pd.DataFrame:
         # Historical tenancy workbooks must not be billed using the legacy
