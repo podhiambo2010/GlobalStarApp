@@ -1,0 +1,18 @@
+name: Excel-only V1 safety gate
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [release/v1-excel-only-restoration]
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python syntax check
+        run: python -m compileall -q app_frontend.py app_backend.py
+      - name: Excel-only contract checks
+        run: python -m unittest discover -s tests -p 'test_v1_excel_contract.py' -v
