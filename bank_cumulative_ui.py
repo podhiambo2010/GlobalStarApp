@@ -169,6 +169,46 @@ def show_cumulative_bank_updates():
         st.caption("Cumulative coverage: " +
                    min(r["transaction_date"] for r in existing) + " → " +
                    max(r["transaction_date"] for r in existing))
+    if pending:
+        st.subheader("Review newly staged bank movements")
+        st.caption("These bank source records are not accounting postings. "
+                   "Review decisions are auditable and never affect tenant balances.")
+        pending_options = {r["id"]: r for r in _fetch_all(
+            sb, "bank_cumulative_movements",
+            "id,identity_hash,reference_number,transaction_date,transaction_details,money_in,money_out,review_state",
+            ORG) if r["review_state"] == "pending"}
+        identifiers = list(pending_options)
+        selected_id = st.selectbox(
+            "Pending movement", identifiers,
+            format_func=lambda ident:
+                f'{pending_options[ident]["transaction_date"]} · '
+                f'{pending_options[ident]["reference_number"]} · '
+                f'IN {pending_options[ident]["money_in"]} · '
+                f'OUT {pending_options[ident]["money_out"]}'
+        )
+        selected = pending_options[selected_id]
+        st.write("Statement description:", selected["transaction_details"])
+        with st.form(f"cumulative_review_{selected_id}"):
+            outcome = st.radio("Review outcome", ["approved", "excluded"],
+                               format_func=lambda x: "Approve retained bank movement" if x=="approved"
+                               else "Exclude from confirmed bank history", index=None)
+            explanation = st.text_area("Evidence and explanation (required)")
+            attested = st.checkbox("I verified this movement with the bank statement and existing records")
+            submitted = st.form_submit_button("Record bank review", disabled=not admin)
+        if submitted:
+            if not outcome or not attested or len(explanation.strip()) < 8:
+                st.error("Select an outcome, confirm verification and enter at least eight characters.")
+            else:
+                try:
+                    sb.rpc("review_cumulative_bank_movement", {
+                        "p_movement_id": selected_id,
+                        "p_decision": outcome,
+                        "p_reason": explanation.strip(),
+                    }).execute()
+                    st.success("Bank review recorded. Financial postings: 0.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Review could not be recorded: {exc}")
     st.subheader("Compare new annual statement")
     upload = st.file_uploader("Bank statement (.xlsx)", type=["xlsx"], key="rolling_bank_excel")
     if upload is None:
