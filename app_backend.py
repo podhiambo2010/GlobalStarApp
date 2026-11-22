@@ -185,6 +185,7 @@ class TenantPortalBackend:
         self.ignored_json_path = ignored_json_path
         self.df_tenants = None
         self.df_bank = None
+        self.df_bank_full = None  # Complete bank statement for audit; never filtered by tenant rules.
         self.statement_period_str = ""
         self.statement_start_date = None
         self.statement_end_date = None
@@ -404,7 +405,15 @@ class TenantPortalBackend:
                 return True
             return False
 
-        self.df_bank = self.df_bank[~self.df_bank.apply(should_ignore, axis=1)].copy()
+        # Keep every original bank row for independent balance reconciliation.
+        # An ignored rent allocation is NOT a deleted bank transaction.
+        exclusion_mask = self.df_bank.apply(should_ignore, axis=1)
+        self.df_bank_full = self.df_bank.copy()
+        self.df_bank_full["Excluded_From_Legacy_Analysis"] = exclusion_mask
+        self.df_bank_full["Original_Statement_Row"] = self.df_bank_full.index + 1
+        # Preserve previous tenant-assignment behavior until allocation controls
+        # are separately reviewed and approved.
+        self.df_bank = self.df_bank[~exclusion_mask].copy()
 
         if 'July' in xls.sheet_names:
             july_df = pd.read_excel(xls, sheet_name='July')
