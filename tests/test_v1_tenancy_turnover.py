@@ -54,8 +54,59 @@ class TenantTurnoverTests(unittest.TestCase):
             "Identified (verify before notice)", "Review required",
             "Identified (verify before notice)"
         ])
-        self.assertEqual(r.loc[2, "Actual_Collected"], 20000)
-        self.assertEqual(r.loc[3, "Actual_Collected"], 20000)
+        self.assertEqual(r.loc[2, "Actual_Collected"], 0)
+        self.assertEqual(r.loc[3, "Actual_Collected"], 0)
+        self.assertEqual(r.loc[2, "Provisional_Credits"], 20000)
+        self.assertEqual(r.loc[3, "Provisional_Credits"], 20000)
+
+    def test_approved_allocation_targets_exact_tenancy(self):
+        from bank_review_v1 import bank_row_ids, record_decision
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-12-31")
+        tx = pd.DataFrame([
+            {"Transaction Date": "21.07.2026", "Value Date": "21.07.2026",
+             "Transaction Details": "CROWN COURIER", "Money In Num": 20000,
+             "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SHARED"},
+            {"Transaction Date": "20.09.2026", "Value Date": "20.09.2026",
+             "Transaction Details": "MOWLEM HOLDINGS", "Money In Num": 20000,
+             "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SHARED"},
+        ])
+        ids = bank_row_ids(tx)
+        self.assertNotEqual(ids[0], ids[1])
+        decisions = record_decision({}, ids[0], "assign", reg.loc[2, "Tenancy_ID"], "receipt checked")
+        decisions = record_decision(decisions, ids[1], "assign", reg.loc[3, "Tenancy_ID"], "receipt checked")
+        result, p = classify_credits(tx, reg, lambda *x: 13,
+                                      "2026-07-01", "2026-12-31", reviews=decisions)
+        self.assertEqual(result.loc[2, "Actual_Collected"], 20000)
+        self.assertEqual(result.loc[3, "Actual_Collected"], 20000)
+        self.assertTrue((p["Allocation_Status"] == "Assigned (reviewed)").all())
+
+    def test_legacy_ref_exclusion_not_applied_to_both_rows(self):
+        from bank_review_v1 import bank_row_ids, record_decision
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-12-31")
+        tx = pd.DataFrame([
+            {"Transaction Date": "21.07.2026", "Value Date": "21.07.2026",
+             "Transaction Details": "CROWN COURIER", "Money In Num": 20000,
+             "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SAME"},
+            {"Transaction Date": "20.09.2026", "Value Date": "20.09.2026",
+             "Transaction Details": "MOWLEM HOLDINGS", "Money In Num": 20000,
+             "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SAME"},
+        ])
+        ids = bank_row_ids(tx)
+        decisions = record_decision({}, ids[0], "exclude", reason="bank correction confirmed")
+        result, p = classify_credits(
+            tx, reg, lambda *x: 13, "2026-07-01", "2026-12-31",
+            reviews=decisions, old_ignored={"SAME": True})
+        self.assertEqual(p["Allocation_Status"].tolist(),
+                         ["Excluded (reviewed)", "Legacy decision: reverify"])
+        self.assertEqual(result["Actual_Collected"].sum(), 0)
+
+    def test_row_ids_handle_repeated_reference_and_identical_rows(self):
+        from bank_review_v1 import bank_row_ids
+        data = pd.DataFrame([{"Transaction Date": "02.11.2026", "Ref_Clean": "FTX",
+                              "Transaction Details": "Deposit", "Money In Num": 1000,
+                              "Money Out Num": 0}] * 2)
+        ids = bank_row_ids(data)
+        self.assertEqual(len(set(ids)), 2)
 
     def test_former_missing_departure_is_flagged(self):
         rows = self.rows()
