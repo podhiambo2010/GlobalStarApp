@@ -773,13 +773,27 @@ elif module == "Demand Notice Builder":
                         st.error(f"Could not generate the draft PDF: {exc}")
 
 elif module == "Bank Statement Audit":
-  st.subheader("🏦 KCB Bank Statement Audit & Reconciliation")
-  st.markdown(
-      "Displaying complete bank statement records for"
-      f" **{backend.statement_period_str}** (Total Records:"
-      f" {len(backend.df_bank)})"
-  )
-  st.dataframe(backend.df_bank, width="stretch")
+    from bank_reconciliation_v1 import reconcile_bank_ledger, export_reconciliation
+    st.subheader("🏦 KCB Bank Statement Audit & Reconciliation")
+    full_bank = backend.df_bank_full
+    st.caption(f"Uploaded statement: {backend.statement_period_str}. Read-only examination of original bank movements.")
+    audit, exceptions, recon = reconcile_bank_ledger(full_bank)
+    first, second, third = st.columns(3)
+    first.metric("Original bank rows", recon["rows"])
+    second.metric("Unreconciled rows", recon["exceptions"])
+    third.metric("Net balance differences", f"KSh {recon['difference']:,.2f}")
+    if recon["exceptions"]:
+        st.error("Balance differences require investigation against the original KCB statement. No source rows are changed.")
+        st.dataframe(exceptions, width="stretch", hide_index=True)
+    else:
+        st.success("No arithmetic differences found between consecutive bank balances (source completeness not verified).")
+    st.caption(f"Rows excluded from historical tenant analysis but retained in bank audit: {recon['excluded_from_legacy_analysis']}. Shared references are not treated as duplicates.")
+    st.markdown("#### Full original bank statement — with audit columns")
+    st.dataframe(audit, width="stretch", hide_index=True)
+    st.download_button("Download READ-ONLY bank reconciliation (Excel)",
+        data=export_reconciliation(audit, exceptions, recon),
+        file_name="UNVERIFIED_KCB_Bank_Reconciliation.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 elif module == "Annual P&L & iTax Statement":
     from financial_review_v1 import financial_period, review_bank_movements, excel_review_export
@@ -794,7 +808,7 @@ elif module == "Annual P&L & iTax Statement":
         subperiod = st.selectbox("Quarter", ["Q1", "Q2", "Q3", "Q4"])
     start, end = financial_period(fy, period, subperiod)
     st.info(f"Financial period: {start:%d %B %Y} – {end:%d %B %Y}")
-    transactions, summary = review_bank_movements(backend.df_bank, start, end)
+    transactions, summary = review_bank_movements(backend.df_bank_full, start, end)
     if not summary["complete"]:
         st.error("INCOMPLETE BANK COVERAGE: uploaded statement does not span the selected period. A full financial report is unavailable.")
     else:
