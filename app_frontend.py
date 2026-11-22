@@ -27,28 +27,53 @@ st.sidebar.markdown("---")
 uploaded_tenant_file = st.sidebar.file_uploader("Upload Tenants Details (Excel)", type=["xlsx"])
 uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx"])
 
-# Shared non-widget state survives navigation between Streamlit pages.
-# The original upload remains the one source for dashboard and bank comparison.
-# This is an in-memory source handoff, not a database import.
-if uploaded_bank_file is not None:
-    incoming_bytes = uploaded_bank_file.getvalue()
-    import hashlib
-    incoming_hash = hashlib.sha256(incoming_bytes).hexdigest()
-    if st.session_state.get("gsil_bank_upload_sha256") != incoming_hash:
-        st.session_state["gsil_bank_upload_bytes"] = incoming_bytes
-        st.session_state["gsil_bank_upload_name"] = uploaded_bank_file.name
-        st.session_state["gsil_bank_upload_sha256"] = incoming_hash
-if uploaded_tenant_file is not None:
-    st.session_state["gsil_tenant_upload_bytes"] = uploaded_tenant_file.getvalue()
-    st.session_state["gsil_tenant_upload_name"] = uploaded_tenant_file.name
+# Shared source for every page; never ask the user to upload the same workbook again
+# while this Streamlit browser session is active. Files are temporary and isolated
+# from GitHub, Supabase and the production transaction tables.
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
-bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
+if "_gsil_workbook_dir" not in st.session_state:
+    st.session_state["_gsil_workbook_dir"] = TemporaryDirectory(prefix="gsil-session-")
+workbook_dir = Path(st.session_state["_gsil_workbook_dir"].name)
 
-if not os.path.exists("Tenants_Details.xlsx") and uploaded_tenant_file is None:
+for kind, upload in (("tenant", uploaded_tenant_file), ("bank", uploaded_bank_file)):
+    if upload is not None:
+        contents = upload.getvalue()
+        checksum = hashlib.sha256(contents).hexdigest()
+        if st.session_state.get(f"gsil_{kind}_upload_sha256") != checksum:
+            st.session_state[f"gsil_{kind}_upload_bytes"] = contents
+            st.session_state[f"gsil_{kind}_upload_name"] = upload.name
+            st.session_state[f"gsil_{kind}_upload_sha256"] = checksum
+
+def _session_workbook_path(kind, fallback):
+    contents = st.session_state.get(f"gsil_{kind}_upload_bytes")
+    checksum = st.session_state.get(f"gsil_{kind}_upload_sha256")
+    if contents is None or not checksum:
+        return fallback
+    path = workbook_dir / f"{kind}_{checksum[:24]}.xlsx"
+    if not path.exists():
+        path.write_bytes(contents)
+    return str(path)
+
+tenant_path = _session_workbook_path("tenant", "Tenants_Details.xlsx")
+bank_path = _session_workbook_path("bank", "KCB_Bank_Statement.xlsx")
+
+if not os.path.exists(tenant_path):
     st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
-if not os.path.exists("KCB_Bank_Statement.xlsx") and uploaded_bank_file is None:
+if not os.path.exists(bank_path):
     st.warning("⚠️ Please upload your `KCB_Bank_Statement.xlsx` file using the sidebar.")
+
+if st.session_state.get("gsil_bank_upload_name"):
+    st.sidebar.caption(
+        f"Active bank source: {st.session_state['gsil_bank_upload_name']} — "
+        "shared with Cumulative Bank Updates. Upload only once per session."
+    )
+if st.session_state.get("gsil_tenant_upload_name"):
+    st.sidebar.caption(
+        f"Active tenant source: {st.session_state['gsil_tenant_upload_name']}."
+    )
 
 @st.cache_resource
 def get_backend(t_path, b_path):
@@ -57,10 +82,10 @@ def get_backend(t_path, b_path):
         bank_excel_path=b_path,
     )
 
-if (os.path.exists("Tenants_Details.xlsx") or uploaded_tenant_file is not None) and \
-   (os.path.exists("KCB_Bank_Statement.xlsx") or uploaded_bank_file is not None):
+if os.path.exists(tenant_path) and os.path.exists(bank_path):
     backend = get_backend(tenant_path, bank_path)
 else:
+    st.info("Use the original sidebar to upload both workbooks; Cumulative Bank Updates reuses the bank file.")
     st.stop()
 
 st.sidebar.markdown("## Global Star Portal")
