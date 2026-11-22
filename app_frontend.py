@@ -27,6 +27,21 @@ st.sidebar.markdown("---")
 uploaded_tenant_file = st.sidebar.file_uploader("Upload Tenants Details (Excel)", type=["xlsx"])
 uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx"])
 
+# Shared non-widget state survives navigation between Streamlit pages.
+# The original upload remains the one source for dashboard and bank comparison.
+# This is an in-memory source handoff, not a database import.
+if uploaded_bank_file is not None:
+    incoming_bytes = uploaded_bank_file.getvalue()
+    import hashlib
+    incoming_hash = hashlib.sha256(incoming_bytes).hexdigest()
+    if st.session_state.get("gsil_bank_upload_sha256") != incoming_hash:
+        st.session_state["gsil_bank_upload_bytes"] = incoming_bytes
+        st.session_state["gsil_bank_upload_name"] = uploaded_bank_file.name
+        st.session_state["gsil_bank_upload_sha256"] = incoming_hash
+if uploaded_tenant_file is not None:
+    st.session_state["gsil_tenant_upload_bytes"] = uploaded_tenant_file.getvalue()
+    st.session_state["gsil_tenant_upload_name"] = uploaded_tenant_file.name
+
 tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
 bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
 
