@@ -75,6 +75,44 @@ if st.session_state.get("gsil_tenant_upload_name"):
         f"Active tenant source: {st.session_state['gsil_tenant_upload_name']}."
     )
 
+def _inspect_workbook_kind(path):
+    """Identify workbook by column headings rather than filenames."""
+    try:
+        with pd.ExcelFile(path) as book:
+            for sheet in book.sheet_names:
+                for header in (0, 14):
+                    columns = {str(col).strip().lower() for col in
+                               pd.read_excel(book, sheet_name=sheet, header=header, nrows=0).columns}
+                    if {"transaction date", "money in", "money out", "bank reference number"}.issubset(columns):
+                        return "bank"
+                    if {"tenant name", "monthly rate"}.issubset(columns) and (
+                        "shop / unit #" in columns or "shop #" in columns
+                    ):
+                        return "tenant"
+        return "unrecognized"
+    except Exception:
+        return "unreadable"
+
+
+if os.path.exists(tenant_path) and os.path.exists(bank_path):
+    actual_tenant_kind = _inspect_workbook_kind(tenant_path)
+    actual_bank_kind = _inspect_workbook_kind(bank_path)
+    if actual_tenant_kind == "bank" and actual_bank_kind == "tenant":
+        st.error(
+            "The two files are reversed. Upload Tenants Details into the first "
+            "field and KCB Bank Statement into the second field. No database import occurred."
+        )
+        st.stop()
+    if actual_tenant_kind != "tenant" or actual_bank_kind != "bank":
+        st.error(
+            "Workbook validation failed before accounting calculations. "
+            f"First field detected: {actual_tenant_kind}; second field detected: {actual_bank_kind}. "
+            "Confirm that the tenant file contains Tenant Name and Monthly Rate, and "
+            "the bank file contains Transaction Date, Money In, Money Out and Bank Reference Number. "
+            "No database import occurred."
+        )
+        st.stop()
+
 @st.cache_resource
 def get_backend(t_path, b_path):
     return TenantPortalBackend(
