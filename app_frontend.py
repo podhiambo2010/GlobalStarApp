@@ -162,49 +162,13 @@ elif module == "Unmapped Payment Auditor":
 
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
-    st.markdown("Displaying active lease agreements, terms, and extracted billing cycles synchronized directly from Supabase production database.")
-
-    try:
-        leases_res = backend.supabase.table("leases").select(
-            "id, start_date, end_date, billing_cycle, status, units(unit_number, monthly_rent, is_occupied), tenants(full_name, email, phone_number)"
-        ).execute()
-        
-        leases_data = leases_res.data
-        if leases_data:
-            formatted_leases = []
-            for l in leases_data:
-                unit_info = l.get("units") or {}
-                tenant_info = l.get("tenants") or {}
-                
-                end_date_str = l.get("end_date")
-                status = l.get("status", "Active")
-                
-                if end_date_str:
-                    try:
-                        end_dt = datetime.strptime(str(end_date_str)[:10], "%Y-%m-%d")
-                        if end_dt < datetime.now():
-                            status = "Expired"
-                        else:
-                            status = "Active"
-                    except:
-                        pass
-
-                formatted_leases.append({
-                    "Shop #": unit_info.get("unit_number", "N/A"),
-                    "Tenant Name": tenant_info.get("full_name", "Unknown"),
-                    "Monthly Rent (KSh)": unit_info.get("monthly_rent", 0.0),
-                    "Billing Cycle": l.get("billing_cycle", "Monthly"),
-                    "Lease Start": l.get("start_date"),
-                    "Lease End": end_date_str,
-                    "Status": status
-                })
-            
-            df_leases_display = pd.DataFrame(formatted_leases)
-            st.dataframe(df_leases_display, width="stretch")
-        else:
-            st.info("No active lease records found in Supabase.")
-    except Exception as e:
-        st.error(f"Could not load leases from Supabase: {e}")
+    st.markdown("Lease overview from the uploaded tenant workbook (no database connection).")
+    lease_columns = [
+        c for c in ["Shop #", "Tenant Name", "Monthly Rate", "Lease_Date_Parsed",
+                    "Calculated_Lease_End", "Calculated_Status"]
+        if c in backend.df_tenants.columns
+    ]
+    st.dataframe(backend.df_tenants[lease_columns], width="stretch")
 
     st.markdown("---")
     st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
@@ -251,8 +215,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
             else:
                 st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
 
-        if st.button("Register / Update All Extracted Tenants"):
-            st.success("All tenants successfully profiled and synchronized with Supabase records!")
+        st.info("PDF extraction is review-only. Update the tenant workbook after verifying the extracted lease; no database records are changed.")
 
     if st.button("Clear All Reassignment Overrides"):
         if os.path.exists("reassignments.json"):
