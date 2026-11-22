@@ -15,6 +15,23 @@ class FinancialSafetyTests(unittest.TestCase):
         self.assertIsNone(result["receipt_signature"])
         self.assertIsNone(result["qr_code_url"])
 
+    def test_legacy_pdf_generation_blocks_unsafe_output(self):
+        from app_backend import TenantPortalBackend
+        obj = object.__new__(TenantPortalBackend)
+        with self.assertRaisesRegex(RuntimeError, "disabled"):
+            obj.generate_kra_compliance_summary_pdf()
+        with self.assertRaisesRegex(RuntimeError, "disabled"):
+            obj.generate_etims_tax_invoice_pdf("Example", 1, 1000, "", "", "", "", "", "")
+
+    def test_frontend_has_no_unverified_tax_estimate_or_embedded_tokens(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "app_frontend.py").read_text()
+        self.assertNotIn("chargeable_income = max(0.0", source)
+        self.assertNotIn("KRATK04_F7FB9", source)
+        self.assertNotIn("EAASZC9", source)
+        self.assertNotIn("atsk_6e221", source)
+        self.assertIn("financial_review_v1 import", source)
+
     def test_financial_year_ends_30_june(self):
         start, end = financial_period(2026, "Annual")
         self.assertEqual(start, pd.Timestamp("2025-07-01"))
