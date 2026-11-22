@@ -533,6 +533,18 @@ class TenantPortalBackend:
             selected = register[register["Tenancy_ID"] == str(tenancy_id)]
             if selected.empty or bool(selected.iloc[0]["Review_Required"]) or selected.iloc[0]["Tenancy_Status"] == "vacancy":
                 raise ValueError("Choose a valid individual tenancy, not a vacant or unverified record")
+        if decision == "assign":
+            from tenancy_turnover_v1 import _tx_date
+            movement = self.df_bank_unfiltered[self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+            move_date = _tx_date(movement["Transaction Date"])
+            start = selected.iloc[0]["Lease_Date_Parsed"]
+            end = selected.iloc[0]["End_Actual"]
+            if float(movement.get("Money In Num", 0)) <= 0 or pd.isna(move_date):
+                raise ValueError("Only dated incoming credits can be assigned to rent")
+            if pd.isna(start) or move_date < start:
+                raise ValueError("The payment predates this tenancy; do not assign it as rent")
+            if pd.notna(end) and move_date > end and "POST-TENANCY" not in reason.upper():
+                raise ValueError("For a payment after departure, include POST-TENANCY in the evidence note if it settles this former tenant's arrears")
         updated = record_decision(self.tenancy_reviews, bank_row_id, decision, tenancy_id, reason)
         write_review(self.tenancy_review_path, updated)
         self.tenancy_reviews = updated
