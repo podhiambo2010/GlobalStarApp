@@ -78,22 +78,37 @@ def _tx_date(value):
     return pd.to_datetime(value, errors="coerce", dayfirst=True)
 
 
-def classify_credits(bank, register, map_shop, period_start, period_end):
+def classify_credits(bank, register, map_shop, period_start, period_end, reviews=None, old_overrides=None, old_ignored=None):
     """Conservative matching: unique tenant identity AND tenancy dates required.
 
     Neither a shop number nor a shared bank reference proves payer identity.
     Uncertain credits are never assigned to a tenant.
     """
+    from bank_review_v1 import apply_reviews
+    bank = apply_reviews(bank, register, reviews or {}, old_overrides, old_ignored)
     payments = bank[(bank["Money In Num"] > 0) & (bank["Valid_Credit"] == True)].copy()
     payments["Payment_Date_Parsed"] = payments["Transaction Date"].map(_tx_date)
     a, b = pd.Timestamp(period_start), pd.Timestamp(period_end)
     payments = payments[payments["Payment_Date_Parsed"].between(a, b)].copy()
     payments["Tenancy_ID"] = None
     payments["Allocation_Status"] = "Review required"
+    for status, label in [
+        ("Excluded (reviewed)", "Excluded (reviewed)"),
+        ("Pending (reviewed)", "Pending (reviewed)"),
+        ("Legacy decision: reverify", "Legacy decision: reverify"),
+        ("Stale tenancy assignment: reverify", "Stale tenancy assignment: reverify"),
+    ]:
+        payments.loc[payments["Review_Status"] == status, "Allocation_Status"] = label
     for idx, p in payments.iterrows():
+        if p["Review_Status"] == "Assigned (reviewed)":
+            payments.at[idx, "Tenancy_ID"] = p["Reviewed_Tenancy_ID"]
+            payments.at[idx, "Allocation_Status"] = "Assigned (reviewed)"
+            continue
+        if p["Review_Status"] != "Unreviewed":
+            continue
         text = (" ".join(str(p.get(c, "")) for c in ["Transaction Details", "Customers Name"])).upper()
         date = p["Payment_Date_Parsed"]
-        shop = map_shop(p.get("Transaction Details", ""), p.get("Ref_Clean", ""), p.get("Customers Name", ""))
+        shop = map_shop(p.get("Transaction Details", ""), "", p.get("Customers Name", ""))
         candidates = register[
             (register["Shop #"] == shop)
             & (~register["Review_Required"])
@@ -112,9 +127,13 @@ def classify_credits(bank, register, map_shop, period_start, period_end):
             continue
         payments.at[idx, "Tenancy_ID"] = tenant["Tenancy_ID"]
         payments.at[idx, "Allocation_Status"] = "Identified (verify before notice)"
-    sums = payments.dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum()
+    sums = (payments[payments["Allocation_Status"] == "Assigned (reviewed)"]
+            .dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum())
     register = register.copy()
     register["Actual_Collected"] = register["Tenancy_ID"].map(sums).fillna(0)
+    provisional = (payments[payments["Allocation_Status"] == "Identified (verify before notice)"]
+                   .dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum())
+    register["Provisional_Credits"] = register["Tenancy_ID"].map(provisional).fillna(0)
     register["Period_Difference"] = register["Expected_Rent"] - register["Actual_Collected"]
     register["Arrears_Balance"] = register["Period_Difference"]
     # This is NOT lifetime arrears: pre-period opening balances and deposit movements
