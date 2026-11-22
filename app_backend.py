@@ -493,7 +493,24 @@ class TenantPortalBackend:
         elif 'MART' in combined_text or 'CELE' in combined_text: return 22
         return 0
 
+    def tenancy_turnover_report(self, period_start=None, period_end=None):
+        """Excel-only tenancy register and cautious bank credit identification."""
+        from tenancy_turnover_v1 import tenancy_register, classify_credits
+        start = period_start or self.statement_start_date
+        end = period_end or self.statement_end_date
+        if start is None or end is None:
+            raise ValueError("Bank statement reporting dates are unavailable")
+        register = tenancy_register(self.df_tenants, start, end)
+        return classify_credits(self.df_bank, register, self.map_transaction_to_shop, start, end)
+
     def calculate_tenant_arrears(self, current_day: int = None) -> pd.DataFrame:
+        # Historical tenancy workbooks must not be billed using the legacy
+        # shop-level 12-month assumption or cross-tenant bank allocations.
+        if {'Tenancy Record Status', 'Lease End Date'}.issubset(self.df_tenants.columns):
+            register, pending = self.tenancy_turnover_report()
+            self.turnover_pending_credits = pending
+            return register
+
         if current_day is None:
             current_day = self.statement_day
 
