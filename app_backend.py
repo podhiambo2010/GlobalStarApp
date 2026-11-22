@@ -25,7 +25,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
 load_dotenv()
 
@@ -193,73 +192,11 @@ class TenantPortalBackend:
         self.overrides = self.load_json(self.override_json_path)
         self.ignored_refs = self.load_json(self.ignored_json_path)
         
-        # Explicit Supabase Client Initialization & Robust Status Sync
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        if url and key:
-            self.supabase: Client = create_client(url, key)
-            
-            # Robust row-by-row status synchronization
-            try:
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                res = self.supabase.table("leases").select("id, end_date").execute()
-                if res.data:
-                    for lease in res.data:
-                        lease_id = lease.get("id")
-                        end_date = str(lease.get("end_date"))[:10]
-                        new_status = "Expired" if end_date < today_str else "Active"
-                        
-                        # Update individual record by ID
-                        self.supabase.table("leases").update({"status": new_status}).eq("id", lease_id).execute()
-            except Exception as e:
-                print(f"Error syncing lease statuses to Supabase: {e}")
-        else:
-            self.supabase = None
-
+        # Published V1 is Excel-only. Loading a workbook performs no database I/O.
         self.reload_master_data()
 
-    # ==========================================
-    # SUPABASE DATABASE ORM / BRIDGE LAYER
-    # ==========================================
-    @staticmethod
-    def get_supabase_client() -> Client:
-        """Initializes and returns a secure Supabase administrative client."""
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        return create_client(url, key)
-
-    def add_property_with_units(self, portfolio_id: str, property_name: str, location: str, units_list: list) -> dict:
-        """
-        Adds a property linked to a company portfolio, then bulk-inserts all associated units
-        into GlobalStarInvestmentsDB.
-        units_list format: [{"unit_number": "Shop #8", "monthly_rent": 25000}, ...]
-        """
-        supabase = self.get_supabase_client()
-        
-        # 1. Insert Property Record
-        property_data = {
-            "portfolio_id": portfolio_id,
-            "property_name": property_name,
-            "location": location
-        }
-        prop_res = supabase.table("properties").insert(property_data).execute()
-        new_prop_id = prop_res.data[0]['id']
-        
-        # 2. Format and Insert Associated Units
-        formatted_units = [
-            {
-                "property_id": new_prop_id, 
-                "unit_number": unit["unit_number"], 
-                "monthly_rent": unit["monthly_rent"]
-            } 
-            for unit in units_list
-        ]
-        
-        units_res = supabase.table("units").insert(formatted_units).execute()
-        return {
-            "property_id": new_prop_id,
-            "inserted_units_count": len(units_res.data)
-        }
+    # The production V1 backend intentionally has no Supabase bridge.
+    # Database synchronization and write-capable APIs are V2 Commercial features.
 
     def load_json(self, path: str) -> dict:
         if os.path.exists(path):
@@ -491,73 +428,8 @@ class TenantPortalBackend:
 
         self.df_bank['Valid_Credit'] = self.df_bank.apply(is_valid_credit, axis=1)
 
-        # =====================================================================
-        # AUTOMATED SUPABASE SYNC (Isolated at the end)
-        # =====================================================================
-        if self.supabase:
-            try:
-                for _, row in self.df_tenants.iterrows():
-                    shop_raw = row['Shop #']
-                    shop_num = f"Shop #{int(shop_raw)}" if str(shop_raw).isdigit() else str(shop_raw)
-                    tenant_name = str(row['Tenant Name']).strip()
-                    
-                    email_col = col_map.get('email address', next((c for c in self.df_tenants.columns if 'email' in c.lower()), 'Email Address'))
-                    email = str(row.get(email_col, '')) if email_col in row else ''
-                    email = email if email and email.lower() != 'nan' else "N/A"
-                    
-                    phone_col = col_map.get('telephone no.', next((c for c in self.df_tenants.columns if 'phone' in c.lower() or 'tel' in c.lower()), 'Telephone No.'))
-                    phone = row.get(phone_col, '') if phone_col in row else ''
-                    if pd.notnull(phone) and str(phone).strip().lower() != 'nan':
-                        try:
-                            phone = str(int(float(phone)))
-                        except:
-                            phone = str(phone).strip()
-                    else:
-                        phone = "0000000000"
-
-                    calc_end = row['Calculated_Lease_End']
-                    calc_status = row['Calculated_Status']
-
-                    unit_res = self.supabase.table("units").select("id").eq("unit_number", shop_num).execute()
-                    if unit_res.data:
-                        unit_id = unit_res.data[0]['id']
-                        
-                        tenant_payload = {
-                            "full_name": tenant_name,
-                            "email": email,
-                            "phone_number": phone
-                        }
-                        
-                        existing_tenant = self.supabase.table("tenants").select("id").eq("full_name", tenant_name).execute()
-                        if existing_tenant.data:
-                            tenant_id = existing_tenant.data[0]['id']
-                            self.supabase.table("tenants").update(tenant_payload).eq("id", tenant_id).execute()
-                        else:
-                            ins_res = self.supabase.table("tenants").insert(tenant_payload).execute()
-                            if ins_res.data:
-                                tenant_id = ins_res.data[0]['id']
-                            else:
-                                continue
-                                
-                        if pd.notnull(calc_end):
-                            end_str = calc_end.strftime("%Y-%m-%d")
-                        else:
-                            end_str = (pd.Timestamp.now() + pd.DateOffset(years=1)).strftime("%Y-%m-%d")
-
-                        lease_check = self.supabase.table("leases").select("id").eq("unit_id", unit_id).execute()
-                        lease_payload = {
-                            "unit_id": unit_id,
-                            "tenant_id": tenant_id,
-                            "billing_cycle": "Monthly",
-                            "end_date": end_str,
-                            "status": calc_status
-                        }
-                        if lease_check.data:
-                            self.supabase.table("leases").update(lease_payload).eq("unit_id", unit_id).execute()
-                        else:
-                            self.supabase.table("leases").insert(lease_payload).execute()
-            except Exception as e:
-                print(f"Notice: Supabase sync encountered non-critical issue: {e}")
+        # Workbook data is now loaded exclusively for V1 Excel reporting.
+        # V2 Commercial manages authenticated database synchronization.
 
     def verify_ocr_against_master(self, extracted_lease: dict) -> dict:
         """
@@ -588,24 +460,6 @@ class TenantPortalBackend:
             verification_results["Discrepancies"].append(f"New Unit / Shop #{shop_no} not found in master spreadsheet.")
             
         return verification_results
-
-    def sync_lease_statuses_to_supabase(self):
-        """Pushes manual lease statuses from Excel / app logic to Supabase production tables."""
-        if not self.supabase or self.df_tenants is None:
-            return False, "Supabase client or tenant master data not initialized."
-            
-        try:
-            for _, row in self.df_tenants.iterrows():
-                shop_num = f"Shop #{int(row['Shop #'])}" if str(row['Shop #']).isdigit() else str(row['Shop #'])
-                manual_status = row.get('Manual_Lease_Status', 'Active')
-                
-                unit_res = self.supabase.table("units").select("id").eq("unit_number", shop_num).execute()
-                if unit_res.data:
-                    unit_id = unit_res.data[0]['id']
-                    self.supabase.table("leases").update({"status": manual_status}).eq("unit_id", unit_id).execute()
-            return True, "Lease statuses successfully synchronized to Supabase!"
-        except Exception as e:
-            return False, str(e)
 
     def map_transaction_to_shop(self, details_str: str, ref_str: str = "", customer_name: str = "") -> int:
         clean_ref = str(ref_str).strip()
