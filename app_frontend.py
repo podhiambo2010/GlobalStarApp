@@ -922,6 +922,96 @@ elif module == "eTIMS Tax Invoices & Bank Statements":
                 else:
                     st.error(msg)
 
+elif module == "Demand Notice Builder":
+    from datetime import date, timedelta
+    from demand_notice_v1 import render_draft_demand_notice
+
+    st.subheader("📄 Demand Notice Builder")
+    st.info(
+        "Excel-only draft workflow. This page creates a reviewable PDF, "
+        "does not send notices, and does not change financial records."
+    )
+    df_notice = backend.calculate_tenant_arrears()
+    if df_notice.empty:
+        st.warning("No tenant accounts found in the uploaded workbook.")
+    else:
+        eligible = df_notice.copy()
+        eligible["Arrears_Balance"] = pd.to_numeric(
+            eligible["Arrears_Balance"], errors="coerce"
+        ).fillna(0)
+        eligible = eligible[eligible["Arrears_Balance"] > 0].copy()
+        if eligible.empty:
+            st.success("No positive arrears appear in the uploaded tenant data.")
+        else:
+            choice = st.selectbox(
+                "Select tenant with outstanding arrears",
+                list(eligible.index),
+                format_func=lambda idx: (
+                    f'Unit {eligible.loc[idx, "Shop #"]} · '
+                    f'{eligible.loc[idx, "Tenant Name"]} · '
+                    f'KSh {eligible.loc[idx, "Arrears_Balance"]:,.2f}'
+                ),
+                key="v1_notice_select",
+            )
+            row = eligible.loc[choice]
+            tenant_name = str(row["Tenant Name"])
+            unit = str(row["Shop #"])
+            amount = float(row["Arrears_Balance"])
+            st.metric("Workbook arrears (unverified)", f"KSh {amount:,.2f}")
+            st.caption(
+                "Check payment allocations, opening balances, renewals and "
+                "contractual notice requirements before using this draft."
+            )
+            date_of_notice = st.date_input(
+                "Draft date", value=date.today(), key="v1_notice_date"
+            )
+            response_date = st.date_input(
+                "Requested response date",
+                value=date.today() + timedelta(days=14),
+                key="v1_notice_response",
+            )
+            notes = st.text_area(
+                "Optional factual notes for the draft",
+                max_chars=1500,
+                placeholder="Only add information confirmed from the lease or accounts.",
+                key="v1_notice_notes",
+            )
+            if response_date < date_of_notice:
+                st.error("Response date must not precede the notice date.")
+            else:
+                st.markdown("#### Draft preview (not sent)")
+                st.write(f"**To:** {tenant_name} — Unit {unit}")
+                st.write(
+                    f"**Outstanding balance per workbook:** KSh {amount:,.2f}"
+                )
+                st.write(f"**Accounts period:** {backend.statement_month_str}")
+                st.write(f"**Response requested by:** {response_date:%d %B %Y}")
+                verified = st.checkbox(
+                    "I understand this is a draft and the arrears, lease and "
+                    "notice requirements must be verified before service.",
+                    key="v1_notice_confirm",
+                )
+                if verified:
+                    try:
+                        pdf = render_draft_demand_notice(
+                            tenant_name=tenant_name,
+                            unit=unit,
+                            outstanding=amount,
+                            as_of=date_of_notice,
+                            response_by=response_date,
+                            account_period=backend.statement_month_str,
+                            additional_notes=notes,
+                        )
+                        st.download_button(
+                            "Download DRAFT Demand Notice (PDF)",
+                            data=pdf,
+                            file_name=f"DRAFT_Demand_Notice_Unit_{unit}.pdf",
+                            mime="application/pdf",
+                            key="v1_notice_pdf",
+                        )
+                    except Exception as exc:
+                        st.error(f"Could not generate the draft PDF: {exc}")
+
 elif module == "Bank Statement Audit":
   st.subheader("🏦 KCB Bank Statement Audit & Reconciliation")
   st.markdown(
