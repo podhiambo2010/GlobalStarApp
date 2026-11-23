@@ -91,7 +91,8 @@ if module == "Dashboard & Arrears":
         )
         cols = ["Shop #", "Tenancy_ID", "Tenant Name", "Tenancy_Status",
                 "Report_Status", "Lease_Date_Parsed", "End_Actual", "Rent_Rate",
-                "Expected_Rent", "Actual_Collected", "Provisional_Credits", "Period_Difference", "Review_Required"]
+                "Expected_Rent", "Actual_Collected", "Provisional_Credits",
+                "Deposit_Received", "Advance_Rent_Received", "Split_Current_Rent_Received", "Period_Difference", "Review_Required"]
         st.dataframe(register[cols], width="stretch", hide_index=True)
         st.warning(
             "Opening balances, security deposits, unapplied payments and bank credits "
@@ -210,6 +211,86 @@ elif module == "Unmapped Payment Auditor":
                     file_name="GlobalStar_Bank_Review_History.json", mime="application/json")
             else:
                 st.info("No new audit events recorded yet. Earlier legacy exclusions remain in ignored_transactions.json.")
+        with st.expander("Split / Allocate Receipt — Deposit and Advance Rent", expanded=False):
+            st.info("Use this for refundable deposits or prepaid rent, including payments made before a lease begins. It does not automatically recognise advance rent as earned income.")
+            st.warning("The component total must equal a single original bank credit. If KSh 100,000, 60,000 and 40,000 are separate bank credits, split or classify each bank row individually.")
+            split_options = credits.loc[~credits["Bank_Row_ID"].isin(backend.receipt_splits)].copy()
+            split_options = split_options.loc[~split_options["Allocation_Status"].isin([
+                "Assigned (reviewed)", "Excluded (reviewed)", "Excluded (legacy)",
+                "Legacy decision: reverify", "Split (reviewed)"])]
+            if split_options.empty:
+                st.info("No eligible incoming credits available for splitting.")
+            else:
+                split_id = st.selectbox("Select exact original bank credit",
+                    split_options["Bank_Row_ID"].astype(str).tolist(),
+                    format_func=lambda rid: (
+                        f"{split_options.loc[split_options['Bank_Row_ID'] == rid, 'Transaction Date'].iloc[0]} | "
+                        f"KSh {float(split_options.loc[split_options['Bank_Row_ID'] == rid, 'Money In Num'].iloc[0]):,.2f} | "
+                        f"{str(split_options.loc[split_options['Bank_Row_ID'] == rid, 'Transaction Details'].iloc[0])[:65]} | {rid}"),
+                    key="split_bank_row")
+                bank_receipt = split_options.loc[split_options["Bank_Row_ID"] == split_id].iloc[0]
+                st.caption(f"Original bank amount: KSh {float(bank_receipt['Money In Num']):,.2f}; bank reference: {bank_receipt['Ref_Clean']}")
+                valid_tenants = register[(~register["Review_Required"]) &
+                    (register["Tenancy_Status"] != "vacancy")].copy()
+                if valid_tenants.empty:
+                    st.error("No valid tenant records available.")
+                else:
+                    split_tenancy = st.selectbox("Allocate to individual tenancy",
+                        valid_tenants["Tenancy_ID"].astype(str).tolist(),
+                        format_func=lambda tid: (
+                            f"Shop {valid_tenants.loc[valid_tenants['Tenancy_ID'] == tid, 'Shop #'].iloc[0]} — "
+                            f"{valid_tenants.loc[valid_tenants['Tenancy_ID'] == tid, 'Tenant Name'].iloc[0]} ({tid})"),
+                        key="split_tenancy")
+                    selected_tenant = valid_tenants.loc[valid_tenants["Tenancy_ID"] == split_tenancy].iloc[0]
+                    nparts = st.number_input("Number of allocation components", min_value=1, max_value=8, value=1, step=1, key="split_parts")
+                    parts = []
+                    for i in range(int(nparts)):
+                        st.markdown(f"**Component {i+1}**")
+                        left, right = st.columns(2)
+                        kind = left.selectbox("Classification", ["Security deposit", "Advance rent", "Current rent"],
+                            key=f"split_kind_{i}")
+                        amount = right.number_input("Amount (KSh)", min_value=0.0, value=0.0, step=100.0,
+                            key=f"split_amount_{i}")
+                        item = {"kind": {"Security deposit": "security_deposit",
+                            "Advance rent": "advance_rent", "Current rent": "current_rent"}[kind],
+                            "amount": amount}
+                        if kind != "Security deposit":
+                            lease_start = selected_tenant["Lease_Date_Parsed"].date()
+                            ds, de = st.columns(2)
+                            item["period_start"] = ds.date_input("Rental period from", value=lease_start,
+                                key=f"split_start_{i}")
+                            item["period_end"] = de.date_input("Rental period through", value=lease_start,
+                                key=f"split_end_{i}")
+                        parts.append(item)
+                    total = sum(float(x["amount"]) for x in parts)
+                    balance = float(bank_receipt["Money In Num"]) - total
+                    st.caption(f"Components KSh {total:,.2f} | Unallocated difference KSh {balance:,.2f}")
+                    supporting = st.text_input("Supporting receipt / evidence and reason",
+                        key="split_evidence", placeholder="Receipt ID and pre-tenancy deposit/advance details")
+                    approved = st.checkbox("I verified the receipt, individual tenancy and applicable rental periods",
+                        key="split_confirm")
+                    if st.button("Save verified receipt split", type="primary",
+                        disabled=not approved or not supporting.strip() or abs(balance) > 0.005,
+                        key="save_split"):
+                        try:
+                            backend.save_receipt_split(split_id, split_tenancy, parts, supporting)
+                        except (ValueError, OSError) as exc:
+                            st.error(str(exc))
+                        else:
+                            st.success("Bank receipt split recorded. Deposit and advance rent kept separate from recognised rent.")
+                            st.rerun()
+            if backend.receipt_splits:
+                st.markdown("**Saved splits (read only)**")
+                st.dataframe(pd.DataFrame([
+                    {"Bank_Row_ID": rid, "Tenancy_ID": val["tenancy_id"],
+                     "Original_Credit_KSh": val["original_amount_cents"]/100,
+                     "Security_Deposit_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "security_deposit")/100,
+                     "Advance_Rent_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "advance_rent")/100,
+                     "Current_Rent_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "current_rent")/100}
+                    for rid, val in backend.receipt_splits.items()]), hide_index=True, width="stretch")
+                st.download_button("Download saved receipt splits (backup JSON)",
+                    data=json.dumps(backend.receipt_splits, indent=2),
+                    file_name="GlobalStar_Receipt_Splits_Backup.json", mime="application/json")
         counts = credits["Allocation_Status"].value_counts()
         st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
         st.caption("Existing automatic description matches are suggestions, not manually verified rent receipts.")
@@ -221,6 +302,7 @@ elif module == "Unmapped Payment Auditor":
             "Assigned (reviewed)",
             "Excluded (reviewed)",
             "Excluded (legacy)",
+            "Split (reviewed)",
         }
         reviewable = credits.copy() if include_matched else credits[
             ~credits["Allocation_Status"].isin(finished_statuses)].copy()
