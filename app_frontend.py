@@ -8,6 +8,7 @@ GOVERNANCE & ARCHITECTURE CONSTITUTION:
 """
 
 import os
+import json
 from datetime import datetime
 from app_backend import LeaseDocumentAI, TenantPortalBackend
 from etims_service import KRAeTIMSClient
@@ -133,6 +134,33 @@ elif module == "Unmapped Payment Auditor":
         register, credits = backend.tenancy_turnover_report()
         st.info("Decisions are recorded per original bank row, not per shared reference. Existing shop-based reviews are retained as legacy history.")
         st.warning("Do not classify deposits, owner transfers, duplicate/reversed credits or unidentified receipts as rent without documentary support.")
+        st.download_button("Download tenancy review decisions (backup JSON)",
+            data=json.dumps(backend.tenancy_reviews, indent=2),
+            file_name="GlobalStar_V1_Tenancy_Bank_Review_Backup.json",
+            mime="application/json")
+        backup = st.file_uploader("Restore a previously downloaded review backup (optional)",
+            type=["json"], key="turnover_review_backup")
+        if backup is not None:
+            try:
+                restored = json.loads(backup.getvalue().decode("utf-8"))
+                if not isinstance(restored, dict):
+                    raise ValueError("Backup must contain a JSON object")
+                bank_ids = set(backend.df_bank_unfiltered["Bank_Row_ID"])
+                if not set(restored).issubset(bank_ids):
+                    raise ValueError("Backup contains bank rows not present in this uploaded statement")
+                if not all(isinstance(v, dict) and
+                           v.get("decision") in {"assign", "exclude", "pending"}
+                           for v in restored.values()):
+                    raise ValueError("Backup contains an invalid review decision")
+                st.warning("Restoring replaces current decisions; download your current backup first.")
+                if st.button("Confirm restore of reviewed bank rows"):
+                    from bank_review_v1 import write_review
+                    write_review(backend.tenancy_review_path, restored)
+                    backend.tenancy_reviews = restored
+                    st.success("Review backup restored")
+                    st.rerun()
+            except (ValueError, UnicodeError) as exc:
+                st.error(f"Backup could not be restored: {exc}")
         reviewable = credits.copy()
         counts = reviewable["Allocation_Status"].value_counts()
         st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
