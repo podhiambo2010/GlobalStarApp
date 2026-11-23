@@ -221,11 +221,11 @@ elif module == "Unmapped Payment Auditor":
                     else:
                         st.success("Exclusion reversed for this row. Original matching rules will run again.")
                         st.rerun()
-        with st.expander("Exclusion History", expanded=False):
+        with st.expander("Bank Review History — Assignments, Pending, Exclusions & Restorations", expanded=False):
             history = load_event_history(backend.tenancy_event_history_path)
             if history:
                 st.dataframe(pd.DataFrame(history).iloc[::-1], hide_index=True, width="stretch")
-                st.download_button("Download exclusion and review history (JSON)",
+                st.download_button("Download bank review history (JSON)",
                     data=json.dumps(history, indent=2),
                     file_name="GlobalStar_Bank_Review_History.json", mime="application/json")
             else:
