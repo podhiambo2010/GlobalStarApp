@@ -130,6 +130,23 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
         if len(candidates) != 1:
             continue
         tenant = candidates.iloc[0]
+        # For turnover at a shop, the shop alias alone cannot prove which
+        # occupant paid. Require a meaningful token for the occupant unless
+        # this is a uniquely referenced legacy override (still provisional).
+        other_occupants = register[
+            (register["Shop #"] == shop)
+            & (register["Tenancy_ID"] != tenant["Tenancy_ID"])
+            & (register["Tenancy_Status"] != "vacancy")
+        ]
+        if not other_occupants.empty and p["Review_Status"] == "Unreviewed":
+            name = str(tenant["Tenant Name"]).upper()
+            tokens = [t for t in re.findall(r"[A-Z]{5,}", name)
+                      if t not in {"LIMITED", "HOLDINGS", "AFRICA",
+                                   "KENYA", "ENTERPRISES", "COMPANY"}]
+            text = (" ".join(str(p.get(k, "")) for k in
+                     ["Transaction Details", "Customers Name"])).upper()
+            if not tokens or not any(t in text for t in tokens):
+                continue
         # Preserve legacy description/alias matching. A unique occupant for the
         # transaction date may be suggested, but not booked as verified rent.
         # Do not require an additional substring of the legal tenant name:
