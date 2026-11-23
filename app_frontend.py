@@ -161,6 +161,55 @@ elif module == "Unmapped Payment Auditor":
                     st.rerun()
             except (ValueError, UnicodeError) as exc:
                 st.error(f"Backup could not be restored: {exc}")
+        from bank_review_v1 import load_event_history
+        with st.expander("Restore Excluded Transaction", expanded=False):
+            excluded = credits[credits["Allocation_Status"].isin([
+                "Excluded (legacy)", "Excluded (reviewed)",
+                "Legacy decision: reverify",
+            ])].copy()
+            excluded = excluded[
+                (excluded["Allocation_Status"] != "Legacy decision: reverify")
+                | excluded["Legacy_Decision"].astype(str).str.contains(
+                    "exclusion", case=False, na=False)
+            ]
+            if excluded.empty:
+                st.info("No currently excluded bank credits to restore for this period.")
+            else:
+                st.dataframe(excluded[[col for col in [
+                    "Transaction Date", "Transaction Details", "Money In Num",
+                    "Ref_Clean", "Bank_Row_ID", "Allocation_Status"
+                ] if col in excluded.columns]], hide_index=True, width="stretch")
+                restore_options = excluded["Bank_Row_ID"].astype(str).tolist()
+                restore_id = st.selectbox("Select excluded bank transaction",
+                    restore_options, key="restore_excluded_row")
+                restore_row = excluded[excluded["Bank_Row_ID"] == restore_id].iloc[0]
+                st.caption(f"Selected amount KSh {float(restore_row['Money In Num']):,.2f}; reference {restore_row['Ref_Clean']}")
+                restore_reason = st.text_input("Reason for restoring this exclusion",
+                    key="restore_exclusion_reason",
+                    placeholder="e.g. Raphael or Everlyne rent incorrectly excluded")
+                acknowledge = st.checkbox(
+                    "I verified the original bank row and intend to reverse this exclusion",
+                    key="restore_exclusion_ack")
+                if st.button("Restore Excluded Transaction", type="primary",
+                             disabled=not acknowledge or not restore_reason.strip(),
+                             key="restore_exclusion_confirm"):
+                    try:
+                        backend.save_tenancy_bank_review(
+                            restore_id, "restore", reason=restore_reason)
+                    except (ValueError, OSError) as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Exclusion reversed for this row. Original matching rules will run again.")
+                        st.rerun()
+        with st.expander("Exclusion History", expanded=False):
+            history = load_event_history(backend.tenancy_event_history_path)
+            if history:
+                st.dataframe(pd.DataFrame(history).iloc[::-1], hide_index=True, width="stretch")
+                st.download_button("Download exclusion and review history (JSON)",
+                    data=json.dumps(history, indent=2),
+                    file_name="GlobalStar_Bank_Review_History.json", mime="application/json")
+            else:
+                st.info("No new audit events recorded yet. Earlier legacy exclusions remain in ignored_transactions.json.")
         counts = credits["Allocation_Status"].value_counts()
         st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
         st.caption("Existing automatic description matches are suggestions, not manually verified rent receipts.")
