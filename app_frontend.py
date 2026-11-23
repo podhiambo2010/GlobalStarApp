@@ -161,9 +161,22 @@ elif module == "Unmapped Payment Auditor":
                     st.rerun()
             except (ValueError, UnicodeError) as exc:
                 st.error(f"Backup could not be restored: {exc}")
-        reviewable = credits.copy()
-        counts = reviewable["Allocation_Status"].value_counts()
+        counts = credits["Allocation_Status"].value_counts()
         st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
+        st.caption("Existing automatic description matches are suggestions, not manually verified rent receipts.")
+        include_matched = st.checkbox("Show already identified, approved and excluded bank credits",
+            value=False, key="turnover_show_all_bank_credits")
+        finished_statuses = {
+            "Identified (verify before notice)",
+            "Identified (legacy override, verify tenancy)",
+            "Assigned (reviewed)",
+            "Excluded (reviewed)",
+            "Excluded (legacy)",
+        }
+        reviewable = credits.copy() if include_matched else credits[
+            ~credits["Allocation_Status"].isin(finished_statuses)].copy()
+        st.caption(f"Showing {len(reviewable)} transactions requiring intervention"
+            if not include_matched else f"Showing all {len(reviewable)} credit transactions")
         display_cols = [x for x in ["Bank_Row_ID", "Transaction Date", "Transaction Details",
             "Money In Num", "Ref_Clean", "Allocation_Status", "Legacy_Decision",
             "Tenancy_ID"] if x in reviewable.columns]
