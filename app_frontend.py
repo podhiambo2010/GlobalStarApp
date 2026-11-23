@@ -68,6 +68,25 @@ module = st.sidebar.radio(
 
 if module == "Dashboard & Arrears":
     st.subheader(f"🏢 Portfolio Dashboard — Tenancy History ({backend.statement_month_str})")
+    from statement_period_v1 import load_baseline, save_baseline, coverage_message
+    baseline_path = "bank_reporting_baseline_v1.json"
+    pinned_start = load_baseline(baseline_path)
+    st.caption(f"Detected KCB statement period: {backend.statement_start_date:%d %b %Y} — {backend.statement_end_date:%d %b %Y} (from the workbook header).")
+    with st.expander("Pinned reporting start — Bank baseline", expanded=False):
+        selected_baseline = st.date_input("Pinned starting date", value=pinned_start,
+            max_value=backend.statement_end_date.date(), key="pinned_kcb_start")
+        st.caption("This setting does not import or merge older statements. Changes take effect after saving.")
+        if st.button("Save pinned start date", key="save_pinned_kcb_start"):
+            save_baseline(baseline_path, selected_baseline)
+            st.success("Pinned reporting start saved locally.")
+            st.rerun()
+    coverage_status, coverage_note = coverage_message(
+        pinned_start, backend.statement_start_date, backend.statement_end_date)
+    st.caption(f"Pinned baseline: {pinned_start:%d %b %Y}")
+    if coverage_status != "covered":
+        st.warning(coverage_note)
+    else:
+        st.info(coverage_note)
     if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
         register, credits = backend.tenancy_turnover_report()
         st.info(
