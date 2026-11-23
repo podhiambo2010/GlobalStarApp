@@ -108,6 +108,30 @@ class TenantTurnoverTests(unittest.TestCase):
         ids = bank_row_ids(data)
         self.assertEqual(len(set(ids)), 2)
 
+    def test_tenancy_identity_survives_workbook_sort(self):
+        original = tenancy_register(self.rows(), "2026-11-01", "2026-11-30")
+        shuffled = tenancy_register(self.rows().iloc[::-1].reset_index(drop=True),
+                                    "2026-11-01", "2026-11-30")
+        self.assertEqual(set(original["Tenancy_ID"]), set(shuffled["Tenancy_ID"]))
+
+    def test_approved_row_overrides_legacy_reference_without_affecting_sibling(self):
+        from bank_review_v1 import bank_row_ids, record_decision
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-12-31")
+        tx = pd.DataFrame([
+            {"Transaction Date": "21.07.2026", "Transaction Details": "CROWN COURIER",
+             "Money In Num": 20000, "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "FTX"},
+            {"Transaction Date": "20.09.2026", "Transaction Details": "MOWLEM HOLDINGS",
+             "Money In Num": 20000, "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "FTX"}
+        ])
+        rid = bank_row_ids(tx)[0]
+        entries = record_decision({}, rid, "assign", reg.loc[2, "Tenancy_ID"], "receipt checked")
+        updated, bank = classify_credits(tx, reg, lambda *x: 13,
+            "2026-07-01", "2026-12-31", reviews=entries, old_overrides={"FTX": 13})
+        self.assertEqual(bank.iloc[0]["Allocation_Status"], "Assigned (reviewed)")
+        self.assertEqual(bank.iloc[1]["Allocation_Status"], "Legacy decision: reverify")
+        self.assertEqual(updated.loc[2, "Actual_Collected"], 20000)
+        self.assertEqual(updated.loc[3, "Actual_Collected"], 0)
+
     def test_former_missing_departure_is_flagged(self):
         rows = self.rows()
         rows.loc[0, "Lease End Date"] = None
