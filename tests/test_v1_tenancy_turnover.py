@@ -223,6 +223,68 @@ class TenantTurnoverTests(unittest.TestCase):
             records = load_event_history(path)
             self.assertEqual([entry["action"] for entry in records], ["exclude", "restore"])
             self.assertEqual(records[1]["reason"], "incorrect exclusion")
+    def test_pretenancy_bank_credit_split_deposit_and_two_future_rents(self):
+        from receipt_split_v1 import create_receipt_split, summarize_splits
+        from bank_review_v1 import bank_row_ids
+        record = self.rows().iloc[[0]].copy()
+        record["Shop #"] = 22
+        record["Tenant Name"] = "Martin Onyango Owiti"
+        record["Lease Date"] = "2026-04-01"
+        record["Lease End Date"] = None
+        record["Tenancy Record Status"] = "Current"
+        reg = tenancy_register(record, "2026-01-01", "2026-12-31")
+        bank = pd.DataFrame([{"Transaction Date": "20.03.2026",
+            "Transaction Details": "Martin incoming advance and deposit",
+            "Money In Num": 200000.0, "Money Out Num": 0.0, "Valid_Credit": True,
+            "Ref_Clean": "PRE-RENT-ONE"}])
+        bank["Bank_Row_ID"] = bank_row_ids(bank)
+        split = create_receipt_split({}, bank.iloc[0]["Bank_Row_ID"],
+            reg.iloc[0]["Tenancy_ID"], bank.iloc[0], reg.iloc[0], [
+            {"kind": "security_deposit", "amount": 100000},
+            {"kind": "advance_rent", "amount": 60000,
+             "period_start": "2026-04-01", "period_end": "2026-05-31"},
+            {"kind": "advance_rent", "amount": 40000,
+             "period_start": "2026-06-01", "period_end": "2026-06-30"},
+            ], "Verified source receipt")
+        out, credited = classify_credits(bank, reg, lambda *args: 22,
+            "2026-01-01", "2026-12-31", splits=split)
+        self.assertEqual(credited.iloc[0]["Allocation_Status"], "Split (reviewed)")
+        self.assertEqual(out.iloc[0]["Deposit_Received"], 100000)
+        self.assertEqual(out.iloc[0]["Advance_Rent_Received"], 100000)
+        self.assertEqual(out.iloc[0]["Actual_Collected"], 0)
+        self.assertEqual(out.iloc[0]["Provisional_Credits"], 0)
+
+    def test_split_rejects_overallocation_and_missing_period(self):
+        from receipt_split_v1 import validate_split
+        tenant = tenancy_register(self.rows().iloc[[0]], "2026-01-01", "2026-12-31").iloc[0]
+        row = {"Money In Num": 200000, "Money Out Num": 0}
+        with self.assertRaises(ValueError):
+            validate_split(row, tenant, [
+                {"kind": "security_deposit", "amount": 100000},
+                {"kind": "advance_rent", "amount": 110000,
+                 "period_start": "2026-02-01", "period_end": "2026-03-01"}])
+        with self.assertRaises(ValueError):
+            validate_split(row, tenant, [
+                {"kind": "advance_rent", "amount": 200000}])
+
+    def test_split_rejects_period_prior_to_tenancy(self):
+        from receipt_split_v1 import validate_split
+        tenant = tenancy_register(self.rows().iloc[[0]], "2026-01-01", "2026-12-31").iloc[0]
+        with self.assertRaises(ValueError):
+            validate_split({"Money In Num": 100000}, tenant, [
+                {"kind": "advance_rent", "amount": 100000,
+                 "period_start": "2023-12-01", "period_end": "2024-01-31"}])
+
+    def test_split_requires_exact_bank_credit_and_no_double_booking(self):
+        from receipt_split_v1 import create_receipt_split
+        tenant = tenancy_register(self.rows().iloc[[0]], "2026-01-01", "2026-12-31").iloc[0]
+        bank = {"Money In Num": 100000.0, "Money Out Num": 0,
+                "Ref_Clean": "TEST", "Transaction Date": "21.11.2025"}
+        split = create_receipt_split({}, "row1", tenant["Tenancy_ID"], bank, tenant,
+            [{"kind": "security_deposit", "amount": 100000}], "Receipt checked")
+        with self.assertRaises(ValueError):
+            create_receipt_split(split, "row1", tenant["Tenancy_ID"], bank, tenant,
+                [{"kind": "security_deposit", "amount": 100000}], "Receipt checked")
     def test_former_missing_departure_is_flagged(self):
         rows = self.rows()
         rows.loc[0, "Lease End Date"] = None
