@@ -391,6 +391,18 @@ class TenantPortalBackend:
                 h_idx = idx
                 break
 
+        if h_idx == 13 and not any(
+            "Transaction Date" in [str(v).strip() for v in df_raw.iloc[idx].values]
+            or "Bank Reference Number" in [str(v).strip() for v in df_raw.iloc[idx].values]
+            for idx in range(len(df_raw))
+        ):
+            xls.close()
+            raise ValueError(
+                "The uploaded Bank Statement workbook does not contain a KCB "
+                "transaction header. It may be a tenants workbook. Please upload "
+                "KCB_Bank_Statement.xlsx under 'Upload Bank Statement (Excel)'."
+            )
+
         columns = [str(c).strip() for c in df_raw.iloc[h_idx].values]
         self.df_bank = pd.read_excel(xls, sheet_name=sheet_name, skiprows=h_idx+1)
         self.df_bank.columns = [str(c).strip() for c in columns]
@@ -402,6 +414,22 @@ class TenantPortalBackend:
         txn_desc_col = col_map.get('transaction details', next((c for c in self.df_bank.columns if 'transaction' in c.lower() or 'description' in c.lower()), 'Transaction Details'))
         ref_col = col_map.get('bank reference number', col_map.get('ref', next((c for c in self.df_bank.columns if 'ref' in c.lower()), 'Bank Reference Number')))
         
+        required_bank_fields = {
+            "Money In": money_in_col, "Money Out": money_out_col,
+            "Transaction Details": txn_desc_col, "Bank Reference Number": ref_col,
+        }
+        missing_bank_fields = [
+            label for label, column in required_bank_fields.items()
+            if column not in self.df_bank.columns
+        ]
+        if missing_bank_fields:
+            raise ValueError(
+                "The Bank Statement upload is missing required KCB columns: "
+                + ", ".join(missing_bank_fields)
+                + ". Confirm the KCB statement is uploaded in the bank field, "
+                  "not the tenant-history workbook."
+            )
+
         self.df_bank['Money In Num'] = pd.to_numeric(
             self.df_bank[money_in_col].astype(str).str.replace(',', '').str.strip(), errors='coerce'
         ).fillna(0)
