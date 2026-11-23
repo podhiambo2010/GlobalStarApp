@@ -126,12 +126,10 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
         if len(candidates) != 1:
             continue
         tenant = candidates.iloc[0]
-        name = str(tenant["Tenant Name"]).upper()
-        tokens = [t for t in re.findall(r"[A-Z]{5,}", name)
-                  if t not in {"LIMITED", "HOLDINGS", "AFRICA", "KENYA", "ENTERPRISES", "COMPANY"}]
-        # Matching a meaningful name token prevents one unit's successor from inheriting credits.
-        if not tokens or not any(t in text for t in tokens):
-            continue
+        # Preserve legacy description/alias matching. A unique occupant for the
+        # transaction date may be suggested, but not booked as verified rent.
+        # Do not require an additional substring of the legal tenant name:
+        # payer aliases such as JOE and CARO are part of the existing matcher.
         payments.at[idx, "Tenancy_ID"] = tenant["Tenancy_ID"]
         payments.at[idx, "Allocation_Status"] = "Identified (verify before notice)"
     sums = (payments[payments["Allocation_Status"] == "Assigned (reviewed)"]
