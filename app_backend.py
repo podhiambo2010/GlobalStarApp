@@ -603,6 +603,8 @@ class TenantPortalBackend:
         if decision == "restore" and previous != "exclude" and reference not in self.ignored_refs:
             raise ValueError("This selected bank row has no recorded exclusion")
         updated = record_decision(self.tenancy_reviews, bank_row_id, decision, tenancy_id, reason)
+        if updated == self.tenancy_reviews:
+            return False  # An unchanged decision must not produce duplicate history.
         from bank_review_v1 import append_review_event
         import getpass
         append_review_event(
@@ -613,6 +615,7 @@ class TenantPortalBackend:
         )
         write_review(self.tenancy_review_path, updated)
         self.tenancy_reviews = updated
+        return True
 
     def calculate_tenant_arrears(self, current_day: int = None) -> pd.DataFrame:
         # Historical tenancy workbooks must not be billed using the legacy
