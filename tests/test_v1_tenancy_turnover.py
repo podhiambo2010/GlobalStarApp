@@ -173,6 +173,56 @@ class TenantTurnoverTests(unittest.TestCase):
         self.assertEqual(credits.iloc[0]["Allocation_Status"], "Excluded (legacy)")
         self.assertEqual(result["Provisional_Credits"].sum(), 0)
 
+    def test_restored_legacy_exclusion_reruns_original_description_matcher(self):
+        from bank_review_v1 import bank_row_ids, record_decision
+        reg = tenancy_register(self.rows().iloc[[0]], "2026-07-01", "2026-07-31")
+        bank = pd.DataFrame([{"Transaction Date": "12.07.2026",
+            "Transaction Details": "PILONA rental payment",
+            "Money In Num": 10000, "Money Out Num": 0,
+            "Valid_Credit": True, "Ref_Clean": "RESTOREME"}])
+        rid = bank_row_ids(bank)[0]
+        decision = record_decision({}, rid, "restore", reason="Originally excluded in error")
+        result, payments = classify_credits(bank, reg,
+            lambda details, ref, customer: 12 if "PILONA" in details else 0,
+            "2026-07-01", "2026-07-31", reviews=decision,
+            old_ignored={"RESTOREME": True})
+        self.assertEqual(payments.iloc[0]["Allocation_Status"],
+                         "Identified (verify before notice)")
+        self.assertEqual(result.iloc[0]["Provisional_Credits"], 10000)
+        self.assertEqual(result.iloc[0]["Actual_Collected"], 0)
+
+    def test_restoring_one_shared_reference_keeps_other_row_unresolved(self):
+        from bank_review_v1 import bank_row_ids, record_decision
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-12-31")
+        bank = pd.DataFrame([
+            {"Transaction Date": "21.07.2026", "Transaction Details": "CROWN COURIER",
+             "Money In Num": 10000, "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SHARED"},
+            {"Transaction Date": "20.09.2026", "Transaction Details": "MOWLEM HOLDINGS",
+             "Money In Num": 20000, "Money Out Num": 0, "Valid_Credit": True, "Ref_Clean": "SHARED"},
+        ])
+        decision = record_decision({}, bank_row_ids(bank)[0], "restore", reason="Wrongly excluded")
+        result, payments = classify_credits(bank, reg, lambda *args: 13,
+            "2026-07-01", "2026-12-31", reviews=decision,
+            old_ignored={"SHARED": True})
+        self.assertEqual(payments["Allocation_Status"].tolist(),
+            ["Identified (verify before notice)", "Legacy decision: reverify"])
+        self.assertEqual(result["Actual_Collected"].sum(), 0)
+
+    def test_restore_requires_reason_and_history_retains_both_actions(self):
+        from bank_review_v1 import (record_decision, append_review_event, load_event_history)
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with self.assertRaises(ValueError):
+            record_decision({}, "row1", "restore")
+        with TemporaryDirectory() as directory:
+            path = str(Path(directory) / "history.json")
+            append_review_event(path, bank_row_id="row1", reference="BANK1",
+                action="exclude", reason="initial review", previous="unreviewed", actor="tester")
+            append_review_event(path, bank_row_id="row1", reference="BANK1",
+                action="restore", reason="incorrect exclusion", previous="exclude", actor="tester")
+            records = load_event_history(path)
+            self.assertEqual([entry["action"] for entry in records], ["exclude", "restore"])
+            self.assertEqual(records[1]["reason"], "incorrect exclusion")
     def test_former_missing_departure_is_flagged(self):
         rows = self.rows()
         rows.loc[0, "Lease End Date"] = None
