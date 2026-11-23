@@ -97,12 +97,13 @@ if module == "Dashboard & Arrears":
         )
         current_count = int((register["Report_Status"] == "Current").sum())
         former_count = int((register["Tenancy_Status"] == "former").sum())
-        pending_count = int((credits["Allocation_Status"] == "Review required").sum())
+        from dashboard_bank_groups_v1 import group_bank_credits
+        credit_groups = group_bank_credits(credits)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Current tenant records", current_count)
         c2.metric("Former tenant records", former_count)
         c3.metric("Expected period rent", f"KSh {register['Expected_Rent'].sum():,.2f}")
-        c4.metric("Credits needing review", int(credits["Allocation_Status"].isin(["Review required", "Legacy decision: reverify", "Stale tenancy assignment: reverify", "Pending (reviewed)"]).sum()))
+        c4.metric("Credits needing review", len(credit_groups["Needs manual review"]))
         st.caption(
             "Verified collections include only reviewed tenancy-specific assignments. Suggested matches remain provisional. "
             "Vacancies are not billed. Future tenancies are not billed before their commencement. "
@@ -117,12 +118,35 @@ if module == "Dashboard & Arrears":
             "Opening balances, security deposits, unapplied payments and bank credits "
             "require reconciliation. Period Difference is not an enforceable arrears balance."
         )
-        if not credits.empty:
-            with st.expander("Bank credits — identified provisionally or awaiting allocation"):
-                cols_credits = [c for c in ["Transaction Date", "Transaction Details",
-                                           "Money In Num", "Ref_Clean", "Allocation_Status",
-                                           "Tenancy_ID"] if c in credits.columns]
-                st.dataframe(credits[cols_credits], width="stretch", hide_index=True)
+        st.markdown("#### Bank receipt reconciliation — by review status")
+        st.caption(
+            "Each row below is one original KCB credit identified by Bank_Row_ID. "
+            "Provisional description matches are not confirmed rent; approved or split "
+            "rows are shown separately and are not new work."
+        )
+        cols_credits = [col for col in [
+            "Bank_Row_ID", "Transaction Date", "Transaction Details",
+            "Money In Num", "Ref_Clean", "Allocation_Status", "Tenancy_ID"
+        ] if col in credits.columns]
+        labels = [
+            ("Needs manual review", True),
+            ("Automatically identified — not approved", False),
+            ("Approved tenancy allocations", False),
+            ("Split deposits / advance rent", False),
+            ("Excluded transactions", False),
+        ]
+        for heading, expanded in labels:
+            items = credit_groups[heading]
+            with st.expander(f"{heading} ({len(items)})", expanded=expanded):
+                if items.empty:
+                    st.info("No bank credits in this category for the uploaded statement.")
+                else:
+                    st.dataframe(items[cols_credits], width="stretch", hide_index=True)
+        st.caption(
+            f"Reconciliation display: {sum(len(items) for items in credit_groups.values())} "
+            f"of {len(credits)} bank credits accounted for across five categories. "
+            "This is classification coverage, not bank-balance reconciliation."
+        )
         if register["Review_Required"].any():
             st.error(f"{int(register['Review_Required'].sum())} tenancy record(s) require clarification.")
     else:
