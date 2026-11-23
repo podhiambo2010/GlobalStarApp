@@ -101,6 +101,7 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
     payments["Allocation_Status"] = "Review required"
     for status, label in [
         ("Excluded (reviewed)", "Excluded (reviewed)"),
+        ("Excluded (legacy)", "Excluded (legacy)"),
         ("Pending (reviewed)", "Pending (reviewed)"),
         ("Legacy decision: reverify", "Legacy decision: reverify"),
         ("Stale tenancy assignment: reverify", "Stale tenancy assignment: reverify"),
@@ -111,11 +112,14 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
             payments.at[idx, "Tenancy_ID"] = p["Reviewed_Tenancy_ID"]
             payments.at[idx, "Allocation_Status"] = "Assigned (reviewed)"
             continue
-        if p["Review_Status"] != "Unreviewed":
+        if p["Review_Status"] not in {"Unreviewed", "Legacy shop mapping: verify tenancy"}:
             continue
-        text = (" ".join(str(p.get(c, "")) for c in ["Transaction Details", "Customers Name"])).upper()
         date = p["Payment_Date_Parsed"]
-        shop = map_shop(p.get("Transaction Details", ""), "", p.get("Customers Name", ""))
+        if p["Review_Status"] == "Legacy shop mapping: verify tenancy":
+            shop = int(old_overrides[str(p.get("Ref_Clean", "")).strip()])
+        else:
+            # Keep the original alias and description rules as the first matcher.
+            shop = map_shop(p.get("Transaction Details", ""), "", p.get("Customers Name", ""))
         candidates = register[
             (register["Shop #"] == shop)
             & (~register["Review_Required"])
@@ -131,12 +135,18 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
         # Do not require an additional substring of the legal tenant name:
         # payer aliases such as JOE and CARO are part of the existing matcher.
         payments.at[idx, "Tenancy_ID"] = tenant["Tenancy_ID"]
-        payments.at[idx, "Allocation_Status"] = "Identified (verify before notice)"
+        payments.at[idx, "Allocation_Status"] = (
+            "Identified (legacy override, verify tenancy)"
+            if p["Review_Status"] == "Legacy shop mapping: verify tenancy"
+            else "Identified (verify before notice)"
+        )
     sums = (payments[payments["Allocation_Status"] == "Assigned (reviewed)"]
             .dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum())
     register = register.copy()
     register["Actual_Collected"] = register["Tenancy_ID"].map(sums).fillna(0)
-    provisional = (payments[payments["Allocation_Status"] == "Identified (verify before notice)"]
+    provisional = (payments[payments["Allocation_Status"].isin([
+        "Identified (verify before notice)", "Identified (legacy override, verify tenancy)"
+    ])]
                    .dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum())
     register["Provisional_Credits"] = register["Tenancy_ID"].map(provisional).fillna(0)
     register["Period_Difference"] = register["Expected_Rent"] - register["Actual_Collected"]
