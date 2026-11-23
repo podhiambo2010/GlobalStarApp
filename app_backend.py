@@ -572,6 +572,8 @@ class TenantPortalBackend:
 
     def save_tenancy_bank_review(self, bank_row_id, decision, tenancy_id=None, reason=""):
         from bank_review_v1 import write_review, record_decision
+        if bank_row_id in self.receipt_splits:
+            raise ValueError("This bank transaction already has a verified receipt split; it cannot also be reviewed as a full rent payment")
         if bank_row_id not in set(self.df_bank_unfiltered["Bank_Row_ID"]):
             raise ValueError("The selected transaction is not in the uploaded bank statement")
         if decision == "assign":
