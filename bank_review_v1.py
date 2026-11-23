@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -73,11 +74,11 @@ def write_review(path, entries):
 def record_decision(entries, row_id, decision, tenancy_id=None, reason=""):
     if not row_id or not isinstance(row_id, str):
         raise ValueError("Select a specific bank row")
-    if decision not in {"assign", "exclude", "pending"}:
+    if decision not in {"assign", "exclude", "pending", "restore"}:
         raise ValueError("Invalid review decision")
     if decision == "assign" and not tenancy_id:
         raise ValueError("Select an individual tenancy")
-    if decision == "exclude" and not reason.strip():
+    if decision in {"exclude", "restore"} and not reason.strip():
         raise ValueError("Exclusions require a reason")
     updated = dict(entries)
     updated[row_id] = {
@@ -113,6 +114,9 @@ def apply_reviews(bank, register, entries, old_overrides=None, old_ignored=None)
                 str(frame.at[idx, "Legacy_Decision"]) + " Earlier reference exclusion"
             ).strip()
         entry = entries.get(row["Bank_Row_ID"])
+        if entry and entry.get("decision") == "restore":
+            frame.at[idx, "Review_Status"] = "Unreviewed"
+            continue
         if entry is None:
             if frame.at[idx, "Legacy_Decision"]:
                 if ref in old_ignored and ref_counts.get(ref, 0) == 1:
@@ -135,3 +139,43 @@ def apply_reviews(bank, register, entries, old_overrides=None, old_ignored=None)
             else:
                 frame.at[idx, "Review_Status"] = "Stale tenancy assignment: reverify"
     return frame
+
+
+def append_review_event(path, *, bank_row_id, reference, action, reason, previous, actor):
+    """Append-only audit events; atomically replace the history document."""
+    history = load_event_history(path)
+    history.append({
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "bank_row_id": str(bank_row_id),
+        "bank_reference": str(reference),
+        "action": str(action),
+        "previous_decision": str(previous),
+        "reason": str(reason).strip(),
+        "actor": str(actor).strip(),
+    })
+    write_event_history(path, history)
+
+
+def write_event_history(path, events):
+    import tempfile
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=str(target.parent), delete=False,
+        prefix=".review-history-", suffix=".tmp",
+    ) as temp:
+        json.dump(events, temp, indent=2, ensure_ascii=False)
+        temp.flush()
+        os.fsync(temp.fileno())
+        temp_path = temp.name
+    os.replace(temp_path, target)
+
+
+def load_event_history(path):
+    if not Path(path).exists():
+        return []
+    with open(path, encoding="utf-8") as handle:
+        events = json.load(handle)
+    if not isinstance(events, list):
+        raise ValueError("Review history must be a JSON list")
+    return events
