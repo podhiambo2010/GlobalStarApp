@@ -85,7 +85,7 @@ def _tx_date(value):
     return pd.to_datetime(value, errors="coerce", dayfirst=True)
 
 
-def classify_credits(bank, register, map_shop, period_start, period_end, reviews=None, old_overrides=None, old_ignored=None):
+def classify_credits(bank, register, map_shop, period_start, period_end, reviews=None, old_overrides=None, old_ignored=None, splits=None):
     """Conservative matching: unique tenant identity AND tenancy dates required.
 
     Neither a shop number nor a shared bank reference proves payer identity.
@@ -107,7 +107,12 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
         ("Stale tenancy assignment: reverify", "Stale tenancy assignment: reverify"),
     ]:
         payments.loc[payments["Review_Status"] == status, "Allocation_Status"] = label
+    splits = splits or {}
     for idx, p in payments.iterrows():
+        if str(p["Bank_Row_ID"]) in splits:
+            payments.at[idx, "Allocation_Status"] = "Split (reviewed)"
+            payments.at[idx, "Tenancy_ID"] = splits[str(p["Bank_Row_ID"])].get("tenancy_id")
+            continue
         if p["Review_Status"] == "Assigned (reviewed)":
             payments.at[idx, "Tenancy_ID"] = p["Reviewed_Tenancy_ID"]
             payments.at[idx, "Allocation_Status"] = "Assigned (reviewed)"
@@ -166,6 +171,8 @@ def classify_credits(bank, register, map_shop, period_start, period_end, reviews
     ])]
                    .dropna(subset=["Tenancy_ID"]).groupby("Tenancy_ID")["Money In Num"].sum())
     register["Provisional_Credits"] = register["Tenancy_ID"].map(provisional).fillna(0)
+    from receipt_split_v1 import summarize_splits
+    register = summarize_splits(register, splits, payments)
     register["Period_Difference"] = register["Expected_Rent"] - register["Actual_Collected"]
     register["Arrears_Balance"] = register["Period_Difference"]
     # This is NOT lifetime arrears: pre-period opening balances and deposit movements
