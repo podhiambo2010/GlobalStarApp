@@ -192,6 +192,7 @@ class TenantPortalBackend:
         self.overrides = self.load_json(self.override_json_path)
         self.ignored_refs = self.load_json(self.ignored_json_path)
         self.tenancy_review_path = "tenancy_bank_reviews_v1.json"
+        self.tenancy_event_history_path = "tenancy_bank_review_history_v1.json"
         from bank_review_v1 import load_review
         self.tenancy_reviews = load_review(self.tenancy_review_path)
         
@@ -551,7 +552,23 @@ class TenantPortalBackend:
                 raise ValueError("The payment predates this tenancy; do not assign it as rent")
             if pd.notna(end) and move_date > end and "POST-TENANCY" not in reason.upper():
                 raise ValueError("For a payment after departure, include POST-TENANCY in the evidence note if it settles this former tenant's arrears")
+        if decision == "restore" and not reason.strip():
+            raise ValueError("Explain why this exclusion should be restored")
+        row = self.df_bank_unfiltered.loc[
+            self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+        reference = str(row["Ref_Clean"]).strip()
+        previous = self.tenancy_reviews.get(bank_row_id, {}).get("decision", "")
+        if decision == "restore" and previous != "exclude" and reference not in self.ignored_refs:
+            raise ValueError("This selected bank row has no recorded exclusion")
         updated = record_decision(self.tenancy_reviews, bank_row_id, decision, tenancy_id, reason)
+        from bank_review_v1 import append_review_event
+        import getpass
+        append_review_event(
+            self.tenancy_event_history_path, bank_row_id=bank_row_id,
+            reference=reference, action=decision, reason=reason,
+            previous=previous or ("legacy reference exclusion" if reference in self.ignored_refs else "unreviewed"),
+            actor=getpass.getuser(),
+        )
         write_review(self.tenancy_review_path, updated)
         self.tenancy_reviews = updated
 
