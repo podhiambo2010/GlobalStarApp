@@ -379,12 +379,15 @@ elif module == "Unmapped Payment Auditor":
                     "Assign to a specific tenancy": "assign",
                     "Exclude from rental allocations": "exclude"}[decision_label]
                 try:
-                    backend.save_tenancy_bank_review(selected_id, decision, chosen_tenancy, reason)
+                    changed = backend.save_tenancy_bank_review(selected_id, decision, chosen_tenancy, reason)
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.success("Decision recorded against this bank row only.")
-                    st.rerun()
+                    if changed:
+                        st.success("Decision recorded against this bank row only.")
+                        st.rerun()
+                    else:
+                        st.info("The decision is unchanged. No duplicate history event was recorded.")
         st.stop()
 
 elif module == "Unmapped Payment Auditor":
