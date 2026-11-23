@@ -195,6 +195,9 @@ class TenantPortalBackend:
         self.tenancy_event_history_path = "tenancy_bank_review_history_v1.json"
         from bank_review_v1 import load_review
         self.tenancy_reviews = load_review(self.tenancy_review_path)
+        from receipt_split_v1 import load_splits
+        self.receipt_split_path = "tenancy_receipt_splits_v1.json"
+        self.receipt_splits = load_splits(self.receipt_split_path)
         
         # Published V1 is Excel-only: never initialize or sync a database.
         self.supabase = None
@@ -527,8 +530,45 @@ class TenantPortalBackend:
         return classify_credits(
             review_bank, register, self.map_transaction_to_shop, start, end,
             reviews=self.tenancy_reviews, old_overrides=self.overrides,
-            old_ignored=self.ignored_refs
+            old_ignored=self.ignored_refs, splits=self.receipt_splits
         )
+
+    def save_receipt_split(self, bank_row_id, tenancy_id, components, evidence):
+        """Allocate one exact bank row without booking deposits as rent."""
+        from receipt_split_v1 import create_receipt_split, save_splits
+        from tenancy_turnover_v1 import tenancy_register
+        from bank_review_v1 import append_review_event
+        import getpass
+        if bank_row_id not in set(self.df_bank_unfiltered["Bank_Row_ID"]):
+            raise ValueError("Bank row not present in the uploaded statement")
+        row = self.df_bank_unfiltered.loc[
+            self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+        register = tenancy_register(
+            self.df_tenants, self.statement_start_date, self.statement_end_date)
+        selected = register.loc[register["Tenancy_ID"] == str(tenancy_id)]
+        if selected.empty:
+            raise ValueError("Individual tenancy was not found")
+        previous = self.tenancy_reviews.get(bank_row_id, {})
+        if previous.get("decision") in {"assign", "exclude"}:
+            raise ValueError("A previously approved assignment/exclusion must first be reviewed")
+        reference = str(row["Ref_Clean"]).strip()
+        if reference in self.ignored_refs and previous.get("decision") != "restore":
+            raise ValueError("Restore this excluded bank row before splitting")
+        if any(x in str(row["Transaction Details"]).upper() for x in
+               ["ONLINE.AC.CLOSURE", "TESTING MPESA", "DIRECTOR DEPOSIT"]):
+            raise ValueError("Automatic non-rent exclusion must be reviewed before splitting")
+        valid = self.df_bank.loc[self.df_bank["Bank_Row_ID"] == bank_row_id]
+        if valid.empty or not bool(valid.iloc[0]["Valid_Credit"]):
+            raise ValueError("Excluded or reversed credit cannot be split")
+        updated = create_receipt_split(
+            self.receipt_splits, bank_row_id, tenancy_id, row, selected.iloc[0],
+            components, evidence, getpass.getuser())
+        append_review_event(
+            self.tenancy_event_history_path, bank_row_id=bank_row_id,
+            reference=reference, action="split_receipt", reason=evidence,
+            previous=previous.get("decision", "unreviewed"), actor=getpass.getuser())
+        save_splits(self.receipt_split_path, updated)
+        self.receipt_splits = updated
 
     def save_tenancy_bank_review(self, bank_row_id, decision, tenancy_id=None, reason=""):
         from bank_review_v1 import write_review, record_decision
