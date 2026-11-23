@@ -102,6 +102,8 @@ def apply_reviews(bank, register, entries, old_overrides=None, old_ignored=None)
     old_overrides = old_overrides or {}
     old_ignored = old_ignored or {}
     valid = set(register["Tenancy_ID"].astype(str))
+    # Reference-only legacy decisions may cover several bank transactions.
+    ref_counts = frame["Ref_Clean"].astype(str).str.strip().value_counts()
     for idx, row in frame.iterrows():
         ref = str(row.get("Ref_Clean", "")).strip()
         if ref in old_overrides:
@@ -113,7 +115,12 @@ def apply_reviews(bank, register, entries, old_overrides=None, old_ignored=None)
         entry = entries.get(row["Bank_Row_ID"])
         if entry is None:
             if frame.at[idx, "Legacy_Decision"]:
-                frame.at[idx, "Review_Status"] = "Legacy decision: reverify"
+                if ref in old_ignored and ref_counts.get(ref, 0) == 1:
+                    frame.at[idx, "Review_Status"] = "Excluded (legacy)"
+                elif ref in old_overrides and ref_counts.get(ref, 0) == 1:
+                    frame.at[idx, "Review_Status"] = "Legacy shop mapping: verify tenancy"
+                else:
+                    frame.at[idx, "Review_Status"] = "Legacy decision: reverify"
             continue
         action = entry.get("decision")
         if action == "exclude":
