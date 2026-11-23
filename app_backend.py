@@ -201,13 +201,19 @@ class TenantPortalBackend:
         self.reload_master_data()
 
     def load_json(self, path: str) -> dict:
-        if os.path.exists(path):
-            try:
-                with open(path, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            raise ValueError(
+                f"Review file '{path}' cannot be read. Restore a valid JSON backup "
+                "rather than losing previous allocation decisions."
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"Review file '{path}' must contain a JSON object.")
+        return data
 
     def save_override(self, txn_ref: str, shop_no: int):
         self.overrides[str(txn_ref).strip()] = int(shop_no)
