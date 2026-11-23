@@ -132,6 +132,47 @@ class TenantTurnoverTests(unittest.TestCase):
         self.assertEqual(updated.loc[2, "Actual_Collected"], 20000)
         self.assertEqual(updated.loc[3, "Actual_Collected"], 0)
 
+    def test_original_alias_matches_single_occupant_without_legal_name_token(self):
+        rows = self.rows().iloc[[0]].copy()
+        rows["Shop #"] = 9
+        rows["Tenant Name"] = "Midtown Barbershop"
+        rows["Tenancy Record Status"] = "Current"
+        rows["Lease End Date"] = None
+        reg = tenancy_register(rows, "2026-07-01", "2026-07-31")
+        bank = pd.DataFrame([{"Transaction Date": "10.07.2026",
+            "Transaction Details": "MPESA JOE /", "Money In Num": 10000,
+            "Valid_Credit": True, "Ref_Clean": "FIRST"}])
+        result, credits = classify_credits(
+            bank, reg,
+            lambda details, ref, customer: 9 if "JOE" in details else 0,
+            "2026-07-01", "2026-07-31")
+        self.assertEqual(credits.iloc[0]["Allocation_Status"], "Identified (verify before notice)")
+        self.assertEqual(result.iloc[0]["Provisional_Credits"], 10000)
+
+    def test_unique_legacy_override_preserved_as_provisional(self):
+        from bank_review_v1 import bank_row_ids
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-07-31")
+        bank = pd.DataFrame([{"Transaction Date": "12.07.2026",
+            "Transaction Details": "Uninformative payer", "Money In Num": 10000,
+            "Valid_Credit": True, "Ref_Clean": "OLD-REF"}])
+        result, credits = classify_credits(
+            bank, reg, lambda *args: 0, "2026-07-01", "2026-07-31",
+            old_overrides={"OLD-REF": 12})
+        self.assertEqual(credits.iloc[0]["Allocation_Status"],
+                         "Identified (legacy override, verify tenancy)")
+        self.assertEqual(result.loc[0, "Provisional_Credits"], 10000)
+        self.assertEqual(result.loc[0, "Actual_Collected"], 0)
+
+    def test_unique_legacy_exclusion_keeps_out_credit(self):
+        reg = tenancy_register(self.rows(), "2026-07-01", "2026-07-31")
+        bank = pd.DataFrame([{"Transaction Date": "12.07.2026",
+            "Transaction Details": "Excluded director movement", "Money In Num": 10000,
+            "Valid_Credit": True, "Ref_Clean": "EXCLUDED"}])
+        result, credits = classify_credits(bank, reg, lambda *args: 12,
+            "2026-07-01", "2026-07-31", old_ignored={"EXCLUDED": True})
+        self.assertEqual(credits.iloc[0]["Allocation_Status"], "Excluded (legacy)")
+        self.assertEqual(result["Provisional_Credits"].sum(), 0)
+
     def test_former_missing_departure_is_flagged(self):
         rows = self.rows()
         rows.loc[0, "Lease End Date"] = None
