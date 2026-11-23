@@ -214,10 +214,22 @@ elif module == "Unmapped Payment Auditor":
         with st.expander("Split / Allocate Receipt — Deposit and Advance Rent", expanded=False):
             st.info("Use this for refundable deposits or prepaid rent, including payments made before a lease begins. It does not automatically recognise advance rent as earned income.")
             st.warning("The component total must equal a single original bank credit. If KSh 100,000, 60,000 and 40,000 are separate bank credits, split or classify each bank row individually.")
-            split_options = credits.loc[~credits["Bank_Row_ID"].isin(backend.receipt_splits)].copy()
-            split_options = split_options.loc[~split_options["Allocation_Status"].isin([
-                "Assigned (reviewed)", "Excluded (reviewed)", "Excluded (legacy)",
-                "Legacy decision: reverify", "Split (reviewed)"])]
+            eligible_split_statuses = {"Review required", "Pending (reviewed)",
+                "Stale tenancy assignment: reverify"}
+            mode = st.radio("Show bank receipts",
+                ["Unmatched / Requires Review", "Provisional matches — needs reclassification"],
+                horizontal=True, key="split_receipt_filter")
+            split_options = credits.loc[
+                ~credits["Bank_Row_ID"].isin(backend.receipt_splits)].copy()
+            if mode == "Unmatched / Requires Review":
+                split_options = split_options.loc[
+                    split_options["Allocation_Status"].isin(eligible_split_statuses)]
+            else:
+                split_options = split_options.loc[
+                    split_options["Allocation_Status"].isin({
+                        "Identified (verify before notice)",
+                        "Identified (legacy override, verify tenancy)"})]
+            st.caption(f"{len(split_options)} eligible bank receipts; approved and excluded entries remain protected.")
             if split_options.empty:
                 st.info("No eligible incoming credits available for splitting.")
             else:
