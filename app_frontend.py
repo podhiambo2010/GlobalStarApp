@@ -74,7 +74,7 @@ if module == "Dashboard & Arrears":
     st.caption(f"Detected KCB statement period: {backend.statement_start_date:%d %b %Y} — {backend.statement_end_date:%d %b %Y} (from the workbook header).")
     with st.expander("Pinned reporting start — Bank baseline", expanded=False):
         selected_baseline = st.date_input("Pinned starting date", value=pinned_start,
-            max_value=backend.statement_end_date.date(), key="pinned_kcb_start")
+            key="pinned_kcb_start")
         st.caption("This setting does not import or merge older statements. Changes take effect after saving.")
         if st.button("Save pinned start date", key="save_pinned_kcb_start"):
             save_baseline(baseline_path, selected_baseline)
