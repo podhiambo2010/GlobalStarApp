@@ -41,3 +41,8 @@ __pycache__/
 KCB_Bank_Statement.xlsx
 Tenants_Details.xlsx
 Working Download Documents/
+# Local bank review state and financial allocation backups (never commit)
+bank_reporting_baseline_v1.json
+tenancy_receipt_splits_v1.json
+tenancy_bank_reviews_v1.json
+tenancy_bank_review_history_v1.json
