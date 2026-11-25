@@ -46,3 +46,7 @@ bank_reporting_baseline_v1.json
 tenancy_receipt_splits_v1.json
 tenancy_bank_reviews_v1.json
 tenancy_bank_review_history_v1.json
+
+# Local owner deposit review and financial evidence (do not publish)
+mowlem_deposit_review.local.json
+mowlem_deposit_review.local.json.tmp
