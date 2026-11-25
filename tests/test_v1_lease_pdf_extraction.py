@@ -41,6 +41,15 @@ class LeaseExtractionTests(unittest.TestCase):
         self.assertEqual(out["Tenant Name"], "Example Limited")
         self.assertTrue(out["Verification Required"])
 
+    def test_unreadable_document_does_not_claim_successful_ocr(self):
+        with patch("app_backend.pypdf.PdfReader", return_value=_Reader("")):
+            out = LeaseDocumentAI.parse_lease_pdf(io.BytesIO(b"not a real pdf"))
+        self.assertIsNone(out["Tenant Name"])
+        self.assertIsNone(out["Monthly Rent (KSh)"])
+        self.assertTrue(out["Verification Required"])
+        self.assertTrue(out["Extraction Warnings"])
+        self.assertEqual(out["Extraction Method"], "PDF text layer")
+
     def test_missing_rent_does_not_crash_master_verification(self):
         obj = object.__new__(TenantPortalBackend)
         obj.df_tenants = pd.DataFrame([{
