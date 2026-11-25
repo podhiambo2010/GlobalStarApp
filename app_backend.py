@@ -126,7 +126,13 @@ class LeaseDocumentAI:
             name = None
             warnings.append("Tenant name could not be isolated confidently.")
 
+        if len(cleaned) >= 50 and all(item is None for item in (name, shop, rent, deposit, commencement)):
+            warnings.append(
+                "OCR recovered text, but no structured lease fields matched. "
+                "Inspect the extracted wording before changing the parser."
+            )
         return {
+            "OCR Raw Text": raw_text,
             "Tenant Name": name,
             "Shop #": shop,
             "Monthly Rent (KSh)": rent,
