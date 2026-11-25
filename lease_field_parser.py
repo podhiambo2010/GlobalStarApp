@@ -102,4 +102,58 @@ def parse_lease_fields(raw_text):
         result["Billing Cycle"] = "Monthly"
     if result["Quarterly Base Rent (KSh)"] is not None and result["Monthly Rent (KSh)"] is None:
         result["Parser Warnings"].append("Quarterly rent retained as quarterly; no monthly figure assumed.")
+
+    # Extract contact identifiers only when a source line is explicitly tied to
+    # the TENANT, or lies within a labelled tenant section. Never fill these
+    # fields from landlord details or from the tenancy spreadsheet.
+    lines = text.splitlines()
+    contact_patterns = {
+        "Email": re.compile(r"[\w.+%-]+@[\w.-]+\.[A-Za-z]{2,}", re.I),
+        "KRA PIN": re.compile(r"\b[A-Z]\d{9}[A-Z]\b", re.I),
+        "Telephone No.": re.compile(
+            r"(?<!\d)(?:\+254[\s.-]?[17]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}"
+            r"|0[17]\d{2}[\s.-]?\d{3}[\s.-]?\d{3})(?!\d)")
+    }
+    field_labels = {
+        "Email": r"e[\s-]?mail(?:\s+address)?",
+        "KRA PIN": r"(?:KRA\s+)?PIN(?:\s+(?:number|no\.?|certificate))?",
+        "Telephone No.": r"(?:telephone|phone|mobile|tel\.?|contact)\s*(?:number|no\.?)?",
+    }
+    def tenant_line(index, line):
+        if re.search(r"\b(?:landlord|lessor|owner|agent)\b", line, re.I):
+            return False
+        if re.search(r"\b(?:tenant|lessee)\b", line, re.I):
+            return True
+        # Unqualified contact lines must be under a recent explicit TENANT
+        # section heading; stop at another party heading.
+        for previous in range(index - 1, max(-1, index - 7), -1):
+            context = lines[previous].strip()
+            if re.search(r"^\s*(?:landlord|lessor|owner|agent)\b", context, re.I):
+                return False
+            if re.search(r"^\s*(?:tenant|lessee)(?:\s+(?:details|information|contacts?|particulars))?\s*[:\-]?\s*$",
+                         context, re.I):
+                return True
+        return False
+
+    for field, expression in contact_patterns.items():
+        found = []
+        for idx, line in enumerate(lines):
+            if not tenant_line(idx, line):
+                continue
+            label = re.search(field_labels[field] + r"\s*[:=.\-]?\s*", line, re.I)
+            if not label:
+                continue
+            # Read labelled text only, not unrelated identifiers elsewhere.
+            for match in expression.finditer(line, label.end()):
+                value = re.sub(r"[\s.\-]", "", match.group(0)) if field == "Telephone No." else match.group(0)
+                if field == "KRA PIN":
+                    value = value.upper()
+                found.append((value, line.strip()))
+        distinct = {value for value, _ in found}
+        if len(distinct) == 1:
+            value, evidence = found[0]
+            assign(field, True, value, evidence)
+        elif len(distinct) > 1:
+            result["Parser Warnings"].append(
+                f"Conflicting tenant {field} values; verify original agreement manually.")
     return result
