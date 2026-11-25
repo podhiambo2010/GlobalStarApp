@@ -491,34 +491,43 @@ class TenantPortalBackend:
         self.df_bank['Valid_Credit'] = self.df_bank.apply(is_valid_credit, axis=1)
 
     def verify_ocr_against_master(self, extracted_lease: dict) -> dict:
-        """
-        Compares OCR-extracted lease details against master spreadsheet values 
-        to verify accuracy before final database synchronization.
-        """
-        shop_no = extracted_lease.get("Shop #", 0)
-        match_row = self.df_tenants[self.df_tenants['Shop #'] == shop_no]
-        
-        verification_results = {
-            "Match Found": not match_row.empty,
-            "Discrepancies": []
-        }
-        
-        if not match_row.empty:
-            master_name = str(match_row.iloc[0]['Tenant Name'])
-            master_rate = float(match_row.iloc[0].get('Monthly Rate', 0))
-            extracted_rate = float(extracted_lease.get("Monthly Rent (KSh)", 0))
-            
-            if extracted_rate > 0 and abs(extracted_rate - master_rate) > 1.0:
-                verification_results["Discrepancies"].append(
-                    f"Rent Mismatch: OCR extracted KSh {extracted_rate:,.2f}, Master ledger has KSh {master_rate:,.2f}"
-                )
-            
-            verification_results["Master Tenant Name"] = master_name
-            verification_results["Manual Status"] = match_row.iloc[0].get('Manual_Lease_Status', 'Active')
+        """Compare only confidently extracted values; do not infer an identity from unit alone."""
+        shop_no = extracted_lease.get("Shop #")
+        name = extracted_lease.get("Tenant Name")
+        results = {"Match Found": False, "Discrepancies": [],
+                   "Manual Status": "Unverified", "Master Tenant Name": None}
+        warnings = extracted_lease.get("Extraction Warnings") or []
+        if warnings:
+            results["Discrepancies"].extend(warnings)
+        if shop_no is None or not name:
+            results["Discrepancies"].append(
+                "Tenant name and shop number must be verified before matching the master workbook.")
+            return results
+        matches = self.df_tenants.loc[
+            pd.to_numeric(self.df_tenants["Shop #"], errors="coerce").eq(shop_no)
+            & self.df_tenants["Tenant Name"].fillna("").astype(str).str.strip().str.casefold().eq(
+                str(name).strip().casefold())
+        ]
+        if len(matches) != 1:
+            results["Discrepancies"].append(
+                "No unique tenancy matched both the extracted tenant name and shop number.")
+            return results
+        entry = matches.iloc[0]
+        results["Match Found"] = True
+        results["Master Tenant Name"] = str(entry["Tenant Name"])
+        results["Manual Status"] = str(entry.get(
+            "Tenancy Record Status", entry.get("Manual_Lease_Status", "Unverified")))
+        extracted_rate = extracted_lease.get("Monthly Rent (KSh)")
+        if extracted_rate is None:
+            results["Discrepancies"].append("Monthly rent was not extracted; manual verification required.")
         else:
-            verification_results["Discrepancies"].append(f"New Unit / Shop #{shop_no} not found in master spreadsheet.")
-            
-        return verification_results
+            master_rate = pd.to_numeric(pd.Series([entry.get("Monthly Rate")]), errors="coerce").iloc[0]
+            if pd.isna(master_rate):
+                results["Discrepancies"].append("Master workbook monthly rent is missing.")
+            elif abs(float(extracted_rate) - float(master_rate)) > 1:
+                results["Discrepancies"].append(
+                    f"Rent mismatch: PDF KSh {float(extracted_rate):,.2f}; master KSh {float(master_rate):,.2f}.")
+        return results
 
     def map_transaction_to_shop(self, details_str: str, ref_str: str = "", customer_name: str = "") -> int:
         clean_ref = str(ref_str).strip()
