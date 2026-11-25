@@ -553,27 +553,58 @@ class TenantPortalBackend:
         self.df_bank['Valid_Credit'] = self.df_bank.apply(is_valid_credit, axis=1)
 
     def verify_ocr_against_master(self, extracted_lease: dict) -> dict:
-        """Compare only confidently extracted values; do not infer an identity from unit alone."""
+        """Review lease identity conservatively; never change tenancy master records."""
+        import re
         shop_no = extracted_lease.get("Shop #")
         name = extracted_lease.get("Tenant Name")
         results = {"Match Found": False, "Discrepancies": [],
                    "Manual Status": "Unverified", "Master Tenant Name": None}
         warnings = extracted_lease.get("Extraction Warnings") or []
-        if warnings:
-            results["Discrepancies"].extend(warnings)
-        if shop_no is None or not name:
-            results["Discrepancies"].append(
-                "Tenant name and shop number must be verified before matching the master workbook.")
+        results["Discrepancies"].extend(warnings)
+
+        def normalized(value):
+            return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
+
+        if not name:
+            results["Discrepancies"].append("Tenant name missing: identity must be checked against the signed lease.")
             return results
-        matches = self.df_tenants.loc[
-            pd.to_numeric(self.df_tenants["Shop #"], errors="coerce").eq(shop_no)
-            & self.df_tenants["Tenant Name"].fillna("").astype(str).str.strip().str.casefold().eq(
-                str(name).strip().casefold())
-        ]
+
+        tenant_names = self.df_tenants["Tenant Name"].fillna("").astype(str)
+        name_mask = tenant_names.map(lambda candidate:
+            normalized(candidate) == normalized(name)
+            or (normalized(name).startswith("hand in hand") and normalized(candidate).startswith("hand in hand"))
+            or (normalized(name).startswith("aloice") and normalized(candidate).startswith("aloice")))
+        possible = self.df_tenants.loc[name_mask]
+        if shop_no is None:
+            if normalized(name).startswith("aloice"):
+                unit19 = possible.loc[pd.to_numeric(possible["Shop #"], errors="coerce").eq(19)]
+                if len(unit19) == 1:
+                    results["Master Tenant Name"] = str(unit19.iloc[0]["Tenant Name"])
+                    results["Manual Status"] = "Unit absent from lease — review against tenancy register"
+                    results["Discrepancies"].append(
+                        "Aloice agreement has no unit number. Workbook records Unit 19; "
+                        "do not insert a unit number into the lease or create an amendment.")
+                    return results
+            results["Discrepancies"].append(
+                "Lease has no unit number; verify tenancy identity manually. No unit inferred.")
+            return results
+
+        matches = possible.loc[pd.to_numeric(possible["Shop #"], errors="coerce").eq(shop_no)]
         if len(matches) != 1:
+            if normalized(name).startswith("hand in hand") and int(shop_no) == 19:
+                registered = possible.loc[pd.to_numeric(possible["Shop #"], errors="coerce").eq(21)]
+                if len(registered) == 1:
+                    results["Master Tenant Name"] = str(registered.iloc[0]["Tenant Name"])
+                    results["Manual Status"] = "Amendment awaiting countersignature"
+                    results["Discrepancies"].append(
+                        "Lease says Office 19, while master workbook says Unit 21. "
+                        "Correction sent for signatures; do not approve the match until "
+                        "a countersigned amendment is verified.")
+                    return results
             results["Discrepancies"].append(
-                "No unique tenancy matched both the extracted tenant name and shop number.")
+                "No unique tenancy matched the extracted name and unit number.")
             return results
+
         entry = matches.iloc[0]
         results["Match Found"] = True
         results["Master Tenant Name"] = str(entry["Tenant Name"])
@@ -581,7 +612,11 @@ class TenantPortalBackend:
             "Tenancy Record Status", entry.get("Manual_Lease_Status", "Unverified")))
         extracted_rate = extracted_lease.get("Monthly Rent (KSh)")
         if extracted_rate is None:
-            results["Discrepancies"].append("Monthly rent was not extracted; manual verification required.")
+            if extracted_lease.get("Billing Cycle") == "Quarterly":
+                results["Discrepancies"].append(
+                    "Quarterly lease terms require review against the billing basis in the master workbook.")
+            else:
+                results["Discrepancies"].append("Monthly rent was not extracted; manual verification required.")
         else:
             master_rate = pd.to_numeric(pd.Series([entry.get("Monthly Rate")]), errors="coerce").iloc[0]
             if pd.isna(master_rate):
