@@ -537,7 +537,15 @@ elif module == "Lease PDF AI Extractor & Alerts":
         for idx, pdf_file in enumerate(uploaded_pdfs):
             st.markdown(f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`")
             extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
+            ocr_text = extracted_info.pop("OCR Raw Text", "")
             st.json(extracted_info)
+            with st.expander("Inspect OCR text for this PDF (read-only)", expanded=False):
+                st.caption("Text is shown for diagnosis; do not treat OCR wording as verified contract data.")
+                if ocr_text.strip():
+                    st.text_area("Recovered text", value=ocr_text, height=320, disabled=True,
+                                 key=f"ocr_text_{pdf_file.name}")
+                else:
+                    st.warning("No OCR text was recovered.")
             st.info(f"Extraction attempted: {extracted_info.get('Extraction Method', 'Unknown')}. Scanned pages may require local Tesseract OCR or manual verification. No fields are automatically posted to the tenant ledger.")
             for issue in extracted_info.get("Extraction Warnings", []):
                 st.warning(issue)
