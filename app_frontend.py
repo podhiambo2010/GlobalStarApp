@@ -469,12 +469,36 @@ elif module == "Unmapped Payment Auditor":
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
     st.markdown("Lease overview from the uploaded tenant workbook (no database connection).")
-    lease_columns = [
-        c for c in ["Shop #", "Tenant Name", "Monthly Rate", "Lease_Date_Parsed",
-                    "Calculated_Lease_End", "Calculated_Status"]
-        if c in backend.df_tenants.columns
-    ]
-    st.dataframe(backend.df_tenants[lease_columns], width="stretch")
+    from lease_overview_v1 import build_lease_overview
+    lease_overview = build_lease_overview(backend.df_tenants)
+    if not {"Tenancy Record Status", "Lease End Date"}.issubset(backend.df_tenants.columns):
+        st.error("Upload the reviewed tenancy-history workbook. Lease expiry alone cannot establish actual occupancy.")
+    else:
+        st.info("Occupancy follows the recorded tenancy status and actual departure date. An expired original term does not automatically make a current tenant former or vacant.")
+        statuses = lease_overview["Occupancy_Status"].value_counts()
+        col_current, col_former, col_vacant, col_review = st.columns(4)
+        col_current.metric("Current occupancy", int(statuses.get("Current", 0)))
+        col_former.metric("Former tenants", int(statuses.get("Former", 0)))
+        col_vacant.metric("Vacancies", int(statuses.get("Vacant", 0)))
+        col_review.metric("Occupancy records needing review",
+            int(lease_overview["Occupancy_Status"].str.contains("Needs review|Unverified").sum()))
+    lease_columns = [c for c in [
+        "Shop #", "Tenant Name", "Monthly Rate", "Tenancy Record Status",
+        "Lease_Date_Parsed", "Lease End Date", "Occupancy_Status",
+        "Original_Term_End_Estimate", "Renewal_Recorded", "Contract_Review_Status",
+        "Lease_Review_Note"
+    ] if c in lease_overview.columns]
+    st.dataframe(lease_overview[lease_columns], width="stretch", hide_index=True)
+    st.caption("Original-term expiry is an advisory document-review flag, not evidence that a tenancy has ended. Renewal documents and termination records require verification.")
+    with st.expander("Lease documentation alerts", expanded=False):
+        flagged = lease_overview.loc[
+            lease_overview["Contract_Review_Status"].str.contains("verify|review", case=False)
+            | lease_overview["Occupancy_Status"].str.contains("review|Unverified", case=False)]
+        if flagged.empty:
+            st.success("No lease documentation flags in the uploaded workbook.")
+        else:
+            st.dataframe(flagged[lease_columns], width="stretch", hide_index=True)
+            st.caption("Alerts are informational. They do not generate notices or alter tenancy records.")
 
     st.markdown("---")
     st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
