@@ -130,3 +130,50 @@ def expired_current_leases(overview, as_of=None):
     ].copy()
     result["Days_Past_Original_Term"] = (now - ends.loc[result.index]).dt.days
     return result.sort_values(["Original_Term_End_Estimate", "Shop #"], kind="stable")
+
+
+
+def occupancy_audit(overview):
+    """Count occupied physical units, and expose conflicts without guessing.
+
+    A 'Current' tenancy record is not proof of a distinct occupied shop:
+    repeated shop numbers, missing unit numbers and conflicting vacancy
+    records must be investigated before finalizing an occupancy report.
+    """
+    if "Shop #" not in overview or "Occupancy_Status" not in overview:
+        raise ValueError("Shop # and calculated occupancy status are required")
+    data = overview.copy()
+    status = data["Occupancy_Status"].fillna("").astype(str)
+    current = status.eq("Current")
+    data["_unit"] = data["Shop #"].apply(
+        lambda value: str(value).strip().casefold()
+        if pd.notna(value) and str(value).strip() else "")
+    current_rows = data.loc[current]
+    by_unit = current_rows.loc[current_rows["_unit"].ne("")].groupby("_unit", sort=False)
+    occupied_units = set(by_unit.groups)
+    duplicated_units = {unit for unit, group in by_unit if len(group) > 1}
+    vacancy_units = set(data.loc[status.eq("Vacant") & data["_unit"].ne(""), "_unit"])
+    conflicting_units = duplicated_units | (occupied_units & vacancy_units)
+    missing_unit = current & data["_unit"].eq("")
+    conflict_current = current & data["_unit"].isin(conflicting_units)
+    issues = data.loc[missing_unit | conflict_current |
+                      status.str.contains("Needs review|Unverified", case=False)].copy()
+    if not issues.empty:
+        def issue(row):
+            if row["Occupancy_Status"] != "Current":
+                return row["Occupancy_Status"]
+            if not row["_unit"]:
+                return "Current tenancy lacks identifiable shop/unit"
+            if row["_unit"] in duplicated_units:
+                return "Multiple current tenancy records for this unit"
+            return "Unit appears both occupied and vacant"
+        issues["Occupancy_Audit_Issue"] = issues.apply(issue, axis=1)
+    return {
+        "current_records": int(current.sum()),
+        "unique_occupied_units": len(occupied_units),
+        "uncontested_occupied_units": len(occupied_units - conflicting_units),
+        "former_records": int(status.eq("Former").sum()),
+        "vacant_units": len(vacancy_units - occupied_units),
+        "conflicting_units": len(conflicting_units),
+        "issues": issues.drop(columns=["_unit"]),
+    }
