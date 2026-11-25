@@ -517,7 +517,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
                 verification_summaries = []
                 for fl in folder_leases:
                     v_res = backend.verify_ocr_against_master(fl)
-                    fl["Master Verification"] = "Pass" if not v_res["Discrepancies"] else "Discrepancy Found"
+                    fl["Master Verification"] = "Review required" if v_res["Discrepancies"] else "Provisional match — verify signed source"
                     fl["Discrepancy Details"] = ", ".join(v_res["Discrepancies"]) if v_res["Discrepancies"] else "None"
                     verification_summaries.append(fl)
                 
@@ -538,7 +538,9 @@ elif module == "Lease PDF AI Extractor & Alerts":
             st.markdown(f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`")
             extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
             st.json(extracted_info)
-            
+            st.info("PDF text-layer extraction only. Image-based scans and handwriting require OCR/manual review. No extracted field is automatically written to the tenant ledger.")
+            for issue in extracted_info.get("Extraction Warnings", []):
+                st.warning(issue)
             verification = backend.verify_ocr_against_master(extracted_info)
             if verification["Match Found"]:
                 st.info(f"📋 Master Ledger Match Found! Registered Tenant: **{verification.get('Master Tenant Name')}** | Manual Status: **{verification.get('Manual Status')}**")
@@ -546,7 +548,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
                     for disc in verification["Discrepancies"]:
                         st.warning(f"⚠️ {disc}")
                 else:
-                    st.success("✅ OCR terms match master spreadsheet records perfectly.")
+                    st.info("Extracted values provisionally agree with the master workbook. Verify against the signed lease before updating records.")
             else:
                 st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
 
