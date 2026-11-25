@@ -538,7 +538,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
             st.markdown(f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`")
             extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
             st.json(extracted_info)
-            st.info("PDF text-layer extraction only. Image-based scans and handwriting require OCR/manual review. No extracted field is automatically written to the tenant ledger.")
+            st.info(f"Extraction attempted: {extracted_info.get('Extraction Method', 'Unknown')}. Scanned pages may require local Tesseract OCR or manual verification. No fields are automatically posted to the tenant ledger.")
             for issue in extracted_info.get("Extraction Warnings", []):
                 st.warning(issue)
             verification = backend.verify_ocr_against_master(extracted_info)
@@ -550,7 +550,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
                 else:
                     st.info("Extracted values provisionally agree with the master workbook. Verify against the signed lease before updating records.")
             else:
-                st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
+                st.warning("⚠️ No verified tenant-and-unit match could be established from this document. Review OCR warnings and signed agreement before registering.")
 
         st.info("PDF extraction is review-only. Update the tenant workbook after verifying the extracted lease; no database records are changed.")
 
