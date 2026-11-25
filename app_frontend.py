@@ -479,12 +479,13 @@ elif module == "Lease PDF AI Extractor & Alerts":
         col_current, col_former, col_vacant, col_review = st.columns(4)
         col_current.metric("Distinct units with current records (provisional)", occupancy_counts["unique_occupied_units"])
         col_former.metric("Former tenancy records", occupancy_counts["former_records"])
-        col_vacant.metric("Vacant units (uncontested)", occupancy_counts["vacant_units"])
+        col_vacant.metric("Vacancy register rows (not verified units)", int(lease_overview["Occupancy_Status"].eq("Vacant").sum()))
         col_review.metric("Occupancy records needing review", len(occupancy_counts["issues"]))
         st.caption(f'Current tenancy records: {occupancy_counts["current_records"]}; '
                    f'uncontested occupied units: {occupancy_counts["uncontested_occupied_units"]}; '
                    f'units with contradictory records: {occupancy_counts["conflicting_units"]}. '
                    "Unit counts are provisional until the register is reconciled.")
+        st.info("The vacancy count above is a count of source-register rows, NOT a count of vacant physical units. Aggregate floor-level UNALLOCATED entries must be broken down into identifiable units before a physical vacancy rate is reported.")
         with st.expander(f'Occupancy exceptions and conflicts ({len(occupancy_counts["issues"])})'):
             if occupancy_counts["issues"].empty:
                 st.success("No record-level occupancy exceptions detected. Verify against the physical rent roll.")
