@@ -77,8 +77,14 @@ class LeaseDocumentAI:
         commencement = unique_match(
             r"(?:commencement\s+date|lease\s+start\s+date)\s*[:=\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{4})",
             "commencement date")
-        name = unique_match(r"(?:tenant|lessee)\s*(?:name)?\s*[:\-]\s*([A-Za-z][A-Za-z &.'\-]{2,65})(?=\s{2,}|\n|$)",
-                            "tenant name", lambda x: x.strip())
+        # Require a labeled, single-line name; do not consume unrelated contract clauses.
+        name_candidates = re.findall(
+            r"(?im)^\s*(?:tenant|lessee)\s*(?:name)?\s*[:\-]\s*([A-Za-z][A-Za-z &.'\-]{2,65})\s*$",
+            raw_text)
+        name_candidates = list(dict.fromkeys(x.strip() for x in name_candidates))
+        name = name_candidates[0] if len(name_candidates) == 1 else None
+        if len(name_candidates) > 1:
+            warnings.append("Conflicting tenant names; manual verification required.")
         # The body is whitespace-normalised; name extraction can be ambiguous.
         if name and len(name.split()) > 8:
             name = None
