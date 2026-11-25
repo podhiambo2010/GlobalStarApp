@@ -43,19 +43,55 @@ class LeaseDocumentAI:
         """
         filename = getattr(pdf_file, "name", "Lease_Document.pdf")
         warnings = []
+        method = "PDF text layer"
+        pages = []
+        pdf_data = None
         try:
             if hasattr(pdf_file, "seek"):
                 pdf_file.seek(0)
-            reader = pypdf.PdfReader(BytesIO(pdf_file.read()) if hasattr(pdf_file, "read") else pdf_file)
+            pdf_data = pdf_file.read() if hasattr(pdf_file, "read") else (
+                pdf_file if isinstance(pdf_file, bytes) else None)
+            reader = pypdf.PdfReader(BytesIO(pdf_data) if pdf_data is not None else pdf_file)
             pages = [page.extract_text() or "" for page in reader.pages]
         except Exception as exc:
-            warnings.append(f"Unable to read PDF: {type(exc).__name__}")
-            pages = []
+            warnings.append(f"Unable to read PDF text layer: {type(exc).__name__}")
         raw_text = "\n".join(pages)
+        if len(" ".join(raw_text.split())) < 50 or (
+            pages and any(len(page.strip()) < 20 for page in pages)
+        ):
+            # The OCR path is local and optional: PyMuPDF renders page images,
+            # and pytesseract calls the user's installed Tesseract executable.
+            # Never report successful OCR if the binary is unavailable.
+            try:
+                import fitz
+                import pytesseract
+                from PIL import Image
+                if pdf_data is None:
+                    raise ValueError("PDF bytes unavailable for OCR")
+                with fitz.open(stream=pdf_data, filetype="pdf") as document:
+                    if len(document) > 25:
+                        warnings.append("Only the first 25 pages were examined with OCR; verify the remainder.")
+                    ocr_pages = []
+                    for idx, page in enumerate(document):
+                        if idx >= 25:
+                            break
+                        text_page = pages[idx] if idx < len(pages) else ""
+                        if len(text_page.strip()) >= 50:
+                            ocr_pages.append(text_page)
+                            continue
+                        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+                        ocr_pages.append(pytesseract.image_to_string(image, lang="eng"))
+                    raw_text = "\n".join(ocr_pages)
+                    method = "PDF text layer + local Tesseract OCR"
+            except (ImportError, FileNotFoundError) as exc:
+                warnings.append(f"Image OCR not available ({type(exc).__name__}). Install PyMuPDF, Pillow, pytesseract and the Tesseract executable.")
+            except Exception as exc:
+                warnings.append(f"Image OCR unsuccessful ({type(exc).__name__}); verify original scan manually.")
         cleaned = " ".join(raw_text.split())
         if len(cleaned) < 50:
-            warnings.append("No reliable machine-readable lease text. Scanned or handwritten PDF requires separate OCR/manual verification.")
-        if pages and any(len(page.strip()) < 20 for page in pages):
+            warnings.append("No reliable machine-readable lease text was recovered; manual transcription required.")
+        if pages and any(len(page.strip()) < 20 for page in pages) and method == "PDF text layer":
             warnings.append("One or more pages contain little or no extractable text; verify completeness manually.")
 
         def unique_match(pattern, label, transform=lambda x: x):
@@ -102,7 +138,7 @@ class LeaseDocumentAI:
             "Billing Cycle": None,
             "Raw Text Length": len(raw_text),
             "Source File": filename,
-            "Extraction Method": "PDF text layer only — not image OCR",
+            "Extraction Method": method,
             "Extraction Warnings": warnings,
             "Verification Required": True,
         }
