@@ -83,7 +83,7 @@ def parse_lease_fields(raw_text):
             return None
 
     date_patterns = [
-      r"(?:shall\s+commence|commencing|commence(?:ment)?(?:\s+date)?|start\s+date)\s*(?:on|from|:|=)?\s*(\d{1,2})(?:st|nd|rd|th)?\s*(?:day\s+of\s+)?([A-Za-z]+|\d{1,2})[\s/.\-]+(\d{2,4})",
+      r"(?:shall\s+commence|commencing|commence(?:ment)?(?:\s+date)?|start\s+date)\s*(?:on|from|:|=)?\s*(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s*(?:day\s+of\s+)?([A-Za-z]+|\d{1,2})[\s/.\-]+(\d{2,4})",
       r"(?:shall\s+commence|commencing|commence(?:ment)?(?:\s+date)?|start\s+date)\s*(?:on|from|:|=)?\s*(\d{1,2})\s*[/.\-]\s*(\d{1,2})\s*[/.\-]\s*(\d{2,4})"
     ]
     for pattern in date_patterns:
