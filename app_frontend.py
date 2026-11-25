@@ -114,6 +114,19 @@ if module == "Dashboard & Arrears":
                 "Expected_Rent", "Actual_Collected", "Provisional_Credits",
                 "Deposit_Received", "Advance_Rent_Received", "Split_Current_Rent_Received", "Period_Difference", "Review_Required"]
         st.dataframe(register[cols], width="stretch", hide_index=True)
+        future_rows = register.loc[register["Report_Status"].astype(str).str.casefold().eq("future")].copy()
+        st.caption(f"Recorded current + future tenancy rows: {current_count + len(future_rows)} "
+                   f"({current_count} current; {len(future_rows)} future). "
+                   "A future tenancy is not counted as physically occupied before commencement. "
+                   "Owner-reported physical occupancy of 22 requires reconciliation with the source register.")
+        with st.expander(f"Future tenancies ({len(future_rows)})", expanded=False):
+            st.dataframe(future_rows[[c for c in ["Shop #", "Tenant Name", "Lease_Date_Parsed", "Report_Status"] if c in future_rows.columns]],
+                         width="stretch", hide_index=True)
+        former_rows = register.loc[register["Tenancy_Status"].astype(str).str.casefold().eq("former")].copy()
+        with st.expander(f"Former tenants — historical register ({len(former_rows)})", expanded=False):
+            st.caption("Historical tenants are retained for settlement and audit; they are not current occupants.")
+            st.dataframe(former_rows[[c for c in ["Shop #", "Tenant Name", "Lease_Date_Parsed", "End_Actual", "Report_Status", "Tenancy_ID"] if c in former_rows.columns]],
+                         width="stretch", hide_index=True)
         st.warning(
             "Opening balances, security deposits, unapplied payments and bank credits "
             "require reconciliation. Period Difference is not an enforceable arrears balance."
@@ -481,6 +494,21 @@ elif module == "Lease PDF AI Extractor & Alerts":
         col_former.metric("Former tenancy records", occupancy_counts["former_records"])
         col_vacant.metric("Vacancy register rows (not verified units)", int(lease_overview["Occupancy_Status"].eq("Vacant").sum()))
         col_review.metric("Occupancy records needing review", len(occupancy_counts["issues"]))
+        future_lease_rows = lease_overview.loc[lease_overview["Occupancy_Status"].eq("Future tenancy")]
+        st.caption(f"Source register: {occupancy_counts['current_records']} current occupancy records + "
+                   f"{len(future_lease_rows)} future tenancies = "
+                   f"{occupancy_counts['current_records'] + len(future_lease_rows)} current/future records. "
+                   "You have confirmed 22 currently occupied units; this differs from the dated source records "
+                   "and must be reconciled before certification. No history is rewritten automatically.")
+        with st.expander(f"Future tenancy register ({len(future_lease_rows)})", expanded=False):
+            st.dataframe(future_lease_rows[[col for col in ["Shop #", "Tenant Name", "Lease_Date_Parsed", "Occupancy_Status"] if col in future_lease_rows]],
+                         width="stretch", hide_index=True)
+        former_lease_rows = lease_overview.loc[
+            lease_overview["Occupancy_Status"].astype(str).str.startswith("Former")
+        ]
+        with st.expander(f"Former tenants — names, units and departure dates ({len(former_lease_rows)})", expanded=False):
+            st.dataframe(former_lease_rows[[col for col in ["Shop #", "Tenant Name", "Lease_Date_Parsed", "Recorded_Departure_Date", "Occupancy_Status"] if col in former_lease_rows]],
+                         width="stretch", hide_index=True)
         st.caption(f'Current tenancy records: {occupancy_counts["current_records"]}; '
                    f'uncontested occupied units: {occupancy_counts["uncontested_occupied_units"]}; '
                    f'units with contradictory records: {occupancy_counts["conflicting_units"]}. '
