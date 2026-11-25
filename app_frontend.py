@@ -172,6 +172,56 @@ elif module == "Deposit & Lease Ledger":
 
     st.dataframe(df_dep[['Shop / Unit #', 'Tenant Name', 'Lease Date', 'Deposit (KSh)', 'Deposit_Timing', 'Lease_Type']], width='stretch')
 
+    # Keep deposit attestations separate from the bank receipt matching system.
+    # This is an owner-reviewed evidence register, not an automatic accounting posting.
+    from deposit_reconciliation_v1 import load_records, update_record, overview_rows
+    from pathlib import Path
+    import getpass
+    deposit_review_path = Path("mowlem_deposit_review.local.json")
+    st.markdown("### Mowlem Holdings — unit-level security deposits")
+    st.caption("Unit 10 and Unit 13 are separate tenancies. Contract amounts are not bank receipts. "
+               "Owner confirmations are recorded separately from bank-verified evidence; no bank transaction is modified.")
+    try:
+        deposit_doc = load_records(deposit_review_path)
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        st.error(f"Deposit review file could not be loaded: {exc}. Restore the local file; no data was reset.")
+    else:
+        st.dataframe(pd.DataFrame(overview_rows(deposit_doc)), hide_index=True, width="stretch")
+        with st.expander("Review / correct Mowlem deposit evidence", expanded=False):
+            st.warning("The Unit 10 KSh 75,000 deposit is owner-confirmed, not yet linked to a verified bank receipt. "
+                       "Unit 13's KSh 60,000 deposit is owner-confirmed unpaid. "
+                       "Do not treat deposits as rental income.")
+            dep_unit = st.selectbox("Choose exact Mowlem unit", [10, 13], key="mowlem_deposit_unit")
+            dep_entry = deposit_doc["records"][str(dep_unit)]
+            dep_paid = st.number_input("Owner-reported deposit received (KSh)",
+                min_value=0.0, max_value=float(dep_entry["expected"]),
+                value=float(dep_entry["owner_reported_paid"]), step=1000.0, key=f"mowlem_dep_paid_{dep_unit}")
+            dep_choices = ["Owner-confirmed paid; bank evidence pending",
+                           "Owner-confirmed unpaid", "Part-paid; bank evidence pending", "Bank-verified"]
+            dep_status = st.selectbox("Evidence status", dep_choices,
+                index=dep_choices.index(dep_entry["status"]), key=f"mowlem_dep_status_{dep_unit}")
+            dep_evidence = st.text_area("Payment evidence / explanation",
+                value=dep_entry["evidence"], key=f"mowlem_dep_evidence_{dep_unit}")
+            confirmed = st.checkbox("I have checked the unit and this deposit evidence",
+                                    key=f"mowlem_dep_confirm_{dep_unit}")
+            if st.button("Save this unit's deposit review", disabled=not confirmed,
+                         key="mowlem_dep_save"):
+                try:
+                    updated = update_record(deposit_review_path, dep_unit, dep_paid, dep_status,
+                                            dep_evidence, actor=getpass.getuser())
+                except (ValueError, OSError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Deposit review saved locally with audit history." if updated
+                               else "No change to deposit review.")
+                    st.rerun()
+        with st.expander("Mowlem deposit review history / backup", expanded=False):
+            st.dataframe(pd.DataFrame(deposit_doc["history"]), hide_index=True, width="stretch") if deposit_doc["history"] else st.info("No manual amendments recorded yet.")
+            st.download_button("Download deposit evidence and history (JSON)",
+                json.dumps(deposit_doc, ensure_ascii=False, indent=2),
+                file_name="Mowlem_Deposit_Review_Backup.json", mime="application/json")
+
+
 elif module == "Unmapped Payment Auditor":
     if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
         st.subheader("🔍 Bank Credit Review — Individual Tenancies")
