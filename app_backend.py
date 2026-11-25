@@ -36,56 +36,69 @@ except ImportError:
 class LeaseDocumentAI:
     @staticmethod
     def parse_lease_pdf(pdf_file):
+        """Conservative text extraction for PDF leases; scanned pages require OCR review.
+
+        No hardcoded tenant, rent, shop number or commencement values are returned.
+        Any missing or ambiguous field remains unverified, never guessed.
         """
-        Parses digital or scanned/handwritten PDF lease agreements to extract tenant name, 
-        shop number, rent amount, security deposit, and lease dates with robust template fallbacks.
-        """
-        raw_text = ""
         filename = getattr(pdf_file, "name", "Lease_Document.pdf")
-        
+        warnings = []
         try:
+            if hasattr(pdf_file, "seek"):
+                pdf_file.seek(0)
             reader = pypdf.PdfReader(BytesIO(pdf_file.read()) if hasattr(pdf_file, "read") else pdf_file)
-            for page in reader.pages:
-                txt = page.extract_text()
-                if txt:
-                    raw_text += txt + "\n"
-        except Exception as e:
-            raw_text = str(e)
+            pages = [page.extract_text() or "" for page in reader.pages]
+        except Exception as exc:
+            warnings.append(f"Unable to read PDF: {type(exc).__name__}")
+            pages = []
+        raw_text = "\n".join(pages)
+        cleaned = " ".join(raw_text.split())
+        if len(cleaned) < 50:
+            warnings.append("No reliable machine-readable lease text. Scanned or handwritten PDF requires separate OCR/manual verification.")
+        if pages and any(len(page.strip()) < 20 for page in pages):
+            warnings.append("One or more pages contain little or no extractable text; verify completeness manually.")
 
-        text_clean = " ".join(raw_text.split())
+        def unique_match(pattern, label, transform=lambda x: x):
+            found = [transform(x) for x in re.findall(pattern, cleaned, re.IGNORECASE)]
+            found = list(dict.fromkeys(found))
+            if len(found) == 1:
+                return found[0]
+            if len(found) > 1:
+                warnings.append(f"Conflicting {label} values; manual verification required.")
+            return None
 
-        # 1. Extract Tenant Name
-        tenant_name = "Unknown Tenant"
-        name_match = re.search(r"(?:tenant|lessee)\s*[:\-]?\s*([A-Z\s]+(?:OTIENO|LIMITED|LTD|COMPANY|PROPERTIES|[A-Z]+))", text_clean, re.IGNORECASE)
-        if name_match:
-            tenant_name = name_match.group(1).strip()
-        elif filename:
-            base_name = os.path.basename(filename).replace(".pdf", "").replace("_", " ")
-            tenant_name = base_name.title()
-
-        # 2. Smart Scanned / Handwritten Fallback for known templates (e.g. Aloice Ngolo Otieno scan)
-        if "Aloice" in tenant_name or len(text_clean) < 50:
-            shop_no = 3
-            monthly_rent = 10000.0
-            deposit = 20000.0
-            commencement = "2025-09-01"
-        else:
-            shop_no = 0
-            monthly_rent = 0.0
-            deposit = 0.0
-            commencement = "2026-01-01"
+        # Avoid extracting figures from unrelated clauses by requiring explicit labels.
+        shop = unique_match(r"(?:shop|unit)\s*(?:no\.?|number|#)\s*[:#\-]?\s*(\d{1,4})\b",
+                            "shop number", lambda x: int(x))
+        rent = unique_match(r"(?:monthly\s+rent|rent\s+per\s+month)\s*(?:\(ksh\))?\s*[:=\-]?\s*(?:ksh|kes)?\s*([\d,]+(?:\.\d{1,2})?)",
+                            "monthly rent", lambda x: float(x.replace(",", "")))
+        deposit = unique_match(r"(?:security\s+deposit|refundable\s+deposit)\s*(?:\(ksh\))?\s*[:=\-]?\s*(?:ksh|kes)?\s*([\d,]+(?:\.\d{1,2})?)",
+                               "security deposit", lambda x: float(x.replace(",", "")))
+        commencement = unique_match(
+            r"(?:commencement\s+date|lease\s+start\s+date)\s*[:=\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{4})",
+            "commencement date")
+        name = unique_match(r"(?:tenant|lessee)\s*(?:name)?\s*[:\-]\s*([A-Za-z][A-Za-z &.'\-]{2,65})(?=\s{2,}|\n|$)",
+                            "tenant name", lambda x: x.strip())
+        # The body is whitespace-normalised; name extraction can be ambiguous.
+        if name and len(name.split()) > 8:
+            name = None
+            warnings.append("Tenant name could not be isolated confidently.")
 
         return {
-            "Tenant Name": tenant_name,
-            "Shop #": shop_no,
-            "Monthly Rent (KSh)": monthly_rent,
+            "Tenant Name": name,
+            "Shop #": shop,
+            "Monthly Rent (KSh)": rent,
             "Security Deposit (KSh)": deposit,
             "Commencement": commencement,
-            "Email": "tenant@gmail.com",
-            "KRA PIN": "N/A",
-            "Telephone No.": "+254700000000",
-            "Billing Cycle": "Monthly",
-            "Raw Text Length": len(raw_text)
+            "Email": None,
+            "KRA PIN": None,
+            "Telephone No.": None,
+            "Billing Cycle": None,
+            "Raw Text Length": len(raw_text),
+            "Source File": filename,
+            "Extraction Method": "PDF text layer only — not image OCR",
+            "Extraction Warnings": warnings,
+            "Verification Required": True,
         }
 
 class TenantPortalBackend:
