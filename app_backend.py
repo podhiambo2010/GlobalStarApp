@@ -126,6 +126,15 @@ class LeaseDocumentAI:
             name = None
             warnings.append("Tenant name could not be isolated confidently.")
 
+        from lease_field_parser import parse_lease_fields
+        extracted = parse_lease_fields(raw_text)
+        name = extracted["Tenant Name"] or name
+        shop = extracted["Shop #"] if extracted["Shop #"] is not None else shop
+        rent = extracted["Monthly Rent (KSh)"] if extracted["Monthly Rent (KSh)"] is not None else rent
+        deposit = extracted["Security Deposit (KSh)"] if extracted["Security Deposit (KSh)"] is not None else deposit
+        commencement = extracted["Commencement"] or commencement
+        warnings.extend(extracted["Parser Warnings"])
+
         if len(cleaned) >= 50 and all(item is None for item in (name, shop, rent, deposit, commencement)):
             warnings.append(
                 "OCR recovered text, but no structured lease fields matched. "
@@ -138,10 +147,15 @@ class LeaseDocumentAI:
             "Monthly Rent (KSh)": rent,
             "Security Deposit (KSh)": deposit,
             "Commencement": commencement,
-            "Email": None,
-            "KRA PIN": None,
-            "Telephone No.": None,
-            "Billing Cycle": None,
+            "Email": extracted["Email"],
+            "KRA PIN": extracted["KRA PIN"],
+            "Telephone No.": extracted["Telephone No."],
+            "Billing Cycle": extracted["Billing Cycle"],
+            "Quarterly Base Rent (KSh)": extracted["Quarterly Base Rent (KSh)"],
+            "Quarterly VAT (KSh)": extracted["Quarterly VAT (KSh)"],
+            "Quarterly Gross Rent (KSh)": extracted["Quarterly Gross Rent (KSh)"],
+            "Lease End Date": extracted["Lease End Date"],
+            "Field Evidence": extracted["Field Evidence"],
             "Raw Text Length": len(raw_text),
             "Source File": filename,
             "Extraction Method": method,
