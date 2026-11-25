@@ -558,7 +558,11 @@ elif module == "Lease PDF AI Extractor & Alerts":
                 else:
                     st.info("Extracted values provisionally agree with the master workbook. Verify against the signed lease before updating records.")
             else:
-                st.warning("⚠️ No verified tenant-and-unit match could be established from this document. Review OCR warnings and signed agreement before registering.")
+                if verification.get("Manual Status") not in (None, "Unverified"):
+                    st.warning(f"📋 Master review status: {verification['Manual Status']} | Registered tenant: {verification.get('Master Tenant Name') or 'Not verified'}")
+                for disc in verification.get("Discrepancies", []):
+                    st.warning(disc)
+                st.warning("No verified tenant-and-unit match. The tenant register and lease remain unchanged.")
 
         st.info("PDF extraction is review-only. Update the tenant workbook after verifying the extracted lease; no database records are changed.")
 
