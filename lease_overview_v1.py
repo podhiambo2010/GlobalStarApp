@@ -112,3 +112,21 @@ def build_lease_overview(frame, as_of=None):
     out["Recorded_Departure_Date"] = departure
     out["Renewal_Recorded"] = renewed
     return out
+
+
+def expired_current_leases(overview, as_of=None):
+    """Only current occupants whose *recorded original* term has expired.
+
+    No alert for former occupants, vacancies, future occupants, or missing terms.
+    A renewal flag alone does not establish a replacement expiry date.
+    """
+    now = pd.Timestamp(as_of if as_of is not None else pd.Timestamp.today()).normalize()
+    required = {"Occupancy_Status", "Original_Term_End_Estimate"}
+    if not required.issubset(overview.columns):
+        raise ValueError("Lease overview has not been calculated")
+    ends = pd.to_datetime(overview["Original_Term_End_Estimate"], errors="coerce")
+    result = overview.loc[
+        overview["Occupancy_Status"].eq("Current") & ends.lt(now)
+    ].copy()
+    result["Days_Past_Original_Term"] = (now - ends.loc[result.index]).dt.days
+    return result.sort_values(["Original_Term_End_Estimate", "Shop #"], kind="stable")
