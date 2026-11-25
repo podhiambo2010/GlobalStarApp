@@ -490,15 +490,20 @@ elif module == "Lease PDF AI Extractor & Alerts":
     ] if c in lease_overview.columns]
     st.dataframe(lease_overview[lease_columns], width="stretch", hide_index=True)
     st.caption("Original-term expiry is an advisory document-review flag, not evidence that a tenancy has ended. Renewal documents and termination records require verification.")
-    with st.expander("Lease documentation alerts", expanded=False):
-        flagged = lease_overview.loc[
-            lease_overview["Contract_Review_Status"].str.contains("verify|review", case=False)
-            | lease_overview["Occupancy_Status"].str.contains("review|Unverified", case=False)]
-        if flagged.empty:
-            st.success("No lease documentation flags in the uploaded workbook.")
+    from lease_overview_v1 import expired_current_leases
+    expired_lease_rows = expired_current_leases(lease_overview)
+    with st.expander(f"Expired original lease terms — current occupants ({len(expired_lease_rows)})", expanded=False):
+        st.caption("Only CURRENT occupants whose original documented duration has passed are listed. Renewal flags do not prove a new lease end date. Former tenants and vacancies are not included.")
+        if expired_lease_rows.empty:
+            st.success("No current occupancies with an expired original lease term found.")
         else:
-            st.dataframe(flagged[lease_columns], width="stretch", hide_index=True)
-            st.caption("Alerts are informational. They do not generate notices or alter tenancy records.")
+            columns = [c for c in [
+                "Shop #", "Tenant Name", "Occupancy_Status", "Lease_Date_Parsed",
+                "Original_Term_End_Estimate", "Days_Past_Original_Term",
+                "Renewal_Recorded", "Contract_Review_Status", "Lease_Review_Note"
+            ] if c in expired_lease_rows.columns]
+            st.dataframe(expired_lease_rows[columns], width="stretch", hide_index=True)
+            st.caption("Informational follow-up only. No automatic notices or tenant changes are made.")
 
     st.markdown("---")
     st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
