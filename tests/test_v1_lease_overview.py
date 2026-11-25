@@ -52,6 +52,19 @@ class LeaseOverviewTests(unittest.TestCase):
         data = build_lease_overview(self.sample(), "2026-11-25")
         self.assertIn("missing", data.loc[4, "Occupancy_Status"])
 
+    def test_expired_alerts_only_include_current_occupants(self):
+        from lease_overview_v1 import expired_current_leases
+        data = build_lease_overview(self.sample(), "2026-11-25")
+        alerts = expired_current_leases(data, "2026-11-25")
+        self.assertEqual(set(alerts["Shop #"].tolist()), {1, 3})
+        self.assertTrue((alerts["Days_Past_Original_Term"] > 0).all())
+
+    def test_missing_duration_not_reported_as_expired(self):
+        from lease_overview_v1 import expired_current_leases
+        data = build_lease_overview(
+            self.sample().drop(columns=["Lease Status (Months)"]), "2026-11-25")
+        self.assertTrue(expired_current_leases(data, "2026-11-25").empty)
+
     def test_no_tenancy_history_is_not_assumed_active(self):
         data = build_lease_overview(self.sample().drop(
             columns=["Tenancy Record Status", "Lease End Date"]), "2026-11-25")
