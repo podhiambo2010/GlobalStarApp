@@ -566,13 +566,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
 
         st.info("PDF extraction is review-only. Update the tenant workbook after verifying the extracted lease; no database records are changed.")
 
-    if st.button("Clear All Reassignment Overrides"):
-        if os.path.exists("reassignments.json"):
-            os.remove("reassignments.json")
-        backend.overrides = {}
-        backend.reload_master_data()
-        st.success("All manual reassignments cleared!")
-        st.rerun()
+    st.caption("Historical bank reassignment overrides are managed separately from lease extraction. This page cannot erase them.")
 
 elif module == "Arrears Payment Reminders":
     # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
