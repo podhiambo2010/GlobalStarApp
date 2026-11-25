@@ -469,19 +469,28 @@ elif module == "Unmapped Payment Auditor":
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
     st.markdown("Lease overview from the uploaded tenant workbook (no database connection).")
-    from lease_overview_v1 import build_lease_overview
+    from lease_overview_v1 import build_lease_overview, occupancy_audit
     lease_overview = build_lease_overview(backend.df_tenants)
+    occupancy_counts = occupancy_audit(lease_overview)
     if not {"Tenancy Record Status", "Lease End Date"}.issubset(backend.df_tenants.columns):
         st.error("Upload the reviewed tenancy-history workbook. Lease expiry alone cannot establish actual occupancy.")
     else:
         st.info("Occupancy follows the recorded tenancy status and actual departure date. An expired original term does not automatically make a current tenant former or vacant.")
-        statuses = lease_overview["Occupancy_Status"].value_counts()
         col_current, col_former, col_vacant, col_review = st.columns(4)
-        col_current.metric("Current occupancy", int(statuses.get("Current", 0)))
-        col_former.metric("Former tenants", int(statuses.get("Former", 0)))
-        col_vacant.metric("Vacancies", int(statuses.get("Vacant", 0)))
-        col_review.metric("Occupancy records needing review",
-            int(lease_overview["Occupancy_Status"].str.contains("Needs review|Unverified").sum()))
+        col_current.metric("Distinct units with current records (provisional)", occupancy_counts["unique_occupied_units"])
+        col_former.metric("Former tenancy records", occupancy_counts["former_records"])
+        col_vacant.metric("Vacant units (uncontested)", occupancy_counts["vacant_units"])
+        col_review.metric("Occupancy records needing review", len(occupancy_counts["issues"]))
+        st.caption(f'Current tenancy records: {occupancy_counts["current_records"]}; '
+                   f'uncontested occupied units: {occupancy_counts["uncontested_occupied_units"]}; '
+                   f'units with contradictory records: {occupancy_counts["conflicting_units"]}. '
+                   "Unit counts are provisional until the register is reconciled.")
+        with st.expander(f'Occupancy exceptions and conflicts ({len(occupancy_counts["issues"])})'):
+            if occupancy_counts["issues"].empty:
+                st.success("No record-level occupancy exceptions detected. Verify against the physical rent roll.")
+            else:
+                st.dataframe(occupancy_counts["issues"], width="stretch", hide_index=True)
+                st.warning("Resolve discrepancies in the source tenancy-history workbook; no data is rewritten here.")
     lease_columns = [c for c in [
         "Shop #", "Tenant Name", "Monthly Rate", "Tenancy Record Status",
         "Lease_Date_Parsed", "Lease End Date", "Occupancy_Status",
