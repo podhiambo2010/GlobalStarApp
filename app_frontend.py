@@ -634,6 +634,10 @@ elif module == "Arrears Payment Reminders":
             st.error(f"Cannot produce a tenancy-level review: {exc}")
             st.stop()
 
+        from opening_balance_review_v1 import load_openings, record_opening, evidence_view
+        import getpass
+        from datetime import date as date_type
+
         review = review_register.copy()
         for amount_col in (
             "Expected_Rent", "Actual_Collected", "Provisional_Credits",
@@ -645,35 +649,134 @@ elif module == "Arrears Payment Reminders":
             review[amount_col] = pd.to_numeric(
                 review[amount_col], errors="coerce").fillna(0.0)
 
-        # A reviewed split may contain current rent, advance rent and deposit.
-        # Show them separately: the receipt's rental period must be verified
-        # before it is recognized as earned income for this reporting period.
+        statement_start = pd.Timestamp(backend.statement_start_date).date()
+        evidence_path = "opening_balances_v1.json"
+        try:
+            opening_data = load_openings(evidence_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            st.error(f"Opening-balance evidence cannot be read safely: {exc}")
+            st.stop()
+
+        # The opening records are shown, but must never automatically change
+        # period differences or the contractual amount due.
+        review = evidence_view(review, opening_data, statement_start)
         review["Period_Difference_Before_Split_Application"] = (
             review["Expected_Rent"] - review["Actual_Collected"]
         )
         review["Evidence_State"] = review.apply(
             lambda row: (
-                "Tenancy record needs review" if bool(row["Review_Required"])
-                else "Opening balance and rent-period verification required"
+                "Tenancy identity / dates need review" if bool(row["Review_Required"])
+                else "Bank allocations, rent periods and opening balance need reconciliation"
             ), axis=1
         )
         st.warning(
-            "Opening balances, receipts outside the uploaded bank period, "
-            "advance-rent application and contractual penalties have NOT been "
-            "reconciled. The displayed difference is not an enforceable debt. "
-            "Security deposits are liabilities, not rental income."
+            "This is not a verified debt balance. Opening-balance evidence is "
+            "stored separately and does NOT modify any amount due. Receipts "
+            "outside the statement, advance-rent application, late fees and "
+            "contractual terms have not yet been reconciled. Security deposits "
+            "are liabilities, not rental income."
         )
         st.caption(
             f"Statement window: {backend.statement_start_date} to "
-            f"{backend.statement_end_date}. One line per tenancy ID; "
-            "a tenant occupying two units appears twice."
+            f"{backend.statement_end_date}. Each tenancy ID is separate; "
+            "one tenant may occupy multiple units."
         )
 
-        a, b, c, d = st.columns(4)
+        a, b, c, d, e = st.columns(5)
         a.metric("Tenancy records", len(review))
-        b.metric("Current occupants (records)", int((review["Report_Status"] == "Current").sum()))
-        c.metric("Former tenancies (records)", int((review["Report_Status"] == "Former").sum()))
-        d.metric("Records needing review", int(review["Review_Required"].sum()))
+        b.metric("Current tenancies", int((review["Report_Status"] == "Current").sum()))
+        c.metric("Former tenancies", int((review["Report_Status"] == "Former").sum()))
+        d.metric("Tenancy exceptions", int(review["Review_Required"].sum()))
+        e.metric(
+            "Provisional credits to verify",
+            int(review_credits["Allocation_Status"].astype(str).str.startswith(
+                "Identified (").sum())
+        )
+
+        with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
+            st.caption(
+                "Enter an independently supported balance as at an exact date. "
+                "Positive means the tenant owed rent; negative means a tenant "
+                "credit. Do not include refundable security deposits. "
+                "The entry is NOT posted to rent, invoices or reminders."
+            )
+            entries = {
+                str(row["Tenancy_ID"]):
+                    f"Unit {row['Shop #']} — {row['Tenant Name']} "
+                    f"[{row['Report_Status']}] — {row['Tenancy_ID']}"
+                for _, row in review.iterrows()
+                if str(row["Tenancy_Status"]) != "vacancy"
+                and not bool(row["Review_Required"])
+            }
+            if entries:
+                selected_id = st.selectbox(
+                    "Exact tenancy", list(entries),
+                    format_func=lambda key: entries[key],
+                    key="opening_evidence_tenancy"
+                )
+                previous = opening_data["balances"].get(selected_id, {})
+                prior_day = previous.get("as_of", statement_start.isoformat())
+                day = st.date_input(
+                    "Opening balance as-of date",
+                    value=date_type.fromisoformat(prior_day),
+                    key=f"opening_evidence_date_{selected_id}"
+                )
+                amt = st.number_input(
+                    "Signed opening balance (KSh); positive = owed, negative = credit",
+                    value=float(previous.get("amount_cents", 0) / 100),
+                    step=100.0, format="%.2f",
+                    key=f"opening_evidence_amount_{selected_id}"
+                )
+                evidence_note = st.text_area(
+                    "Evidence source / supporting explanation (required)",
+                    value=previous.get("evidence", ""),
+                    key=f"opening_evidence_note_{selected_id}"
+                )
+                agreed = st.checkbox(
+                    "I checked the tenancy, date and supporting evidence",
+                    key=f"opening_evidence_confirm_{selected_id}"
+                )
+                if day != statement_start:
+                    st.warning(
+                        "This as-of date does not match the start of the uploaded "
+                        "bank statement. The balance will be documented but "
+                        "cannot be used for a continuous calculation."
+                    )
+                if st.button(
+                    "Record opening balance evidence",
+                    disabled=not agreed or len(evidence_note.strip()) < 10,
+                    key="save_opening_evidence"
+                ):
+                    try:
+                        changed = record_opening(
+                            evidence_path, selected_id, day, amt,
+                            evidence_note, getpass.getuser()
+                        )
+                        if changed:
+                            st.success("Evidence recorded with an audit event; no ledger updated.")
+                        else:
+                            st.info("This evidence was already recorded; no duplicate event.")
+                        st.rerun()
+                    except (ValueError, OSError) as exc:
+                        st.error(f"Opening evidence not saved: {exc}")
+            else:
+                st.info("No eligible tenancy records for an opening-balance review.")
+            if opening_data["history"]:
+                st.markdown("**Opening balance change history**")
+                history_rows = []
+                for event in reversed(opening_data["history"]):
+                    item = event.get("new", {})
+                    history_rows.append({
+                        "Action": event.get("action"),
+                        "Tenancy ID": item.get("tenancy_id"),
+                        "As of": item.get("as_of"),
+                        "Amount (KSh)": item.get("amount_cents", 0) / 100,
+                        "Source": item.get("evidence"),
+                        "Recorded UTC": item.get("recorded_utc"),
+                        "Actor": item.get("actor"),
+                    })
+                st.dataframe(pd.DataFrame(history_rows), use_container_width=True,
+                             hide_index=True)
 
         status_options = ["All"] + sorted(
             str(x) for x in review["Report_Status"].dropna().unique()
@@ -693,11 +796,14 @@ elif module == "Arrears Payment Reminders":
             "End_Actual": "Actual departure",
             "Rent_Rate": "Monthly rent (KSh)",
             "Expected_Rent": "Expected period rent (KSh)",
-            "Actual_Collected": "Reviewed full rent receipts (KSh)",
+            "Actual_Collected": "Reviewed full bank receipts (KSh)",
             "Split_Current_Rent_Received": "Reviewed split current rent (KSh)",
             "Advance_Rent_Received": "Advance rent held (KSh)",
             "Deposit_Received": "Deposit liability received (KSh)",
             "Provisional_Credits": "Suggested receipts — unverified (KSh)",
+            "Opening_As_Of": "Opening balance as-of",
+            "Opening_Balance_KSh": "Documented opening balance (KSh)",
+            "Opening_Status": "Opening evidence status",
             "Period_Difference_Before_Split_Application": "Provisional difference (KSh)",
             "Evidence_State": "Verification status",
         }
@@ -707,10 +813,10 @@ elif module == "Arrears Payment Reminders":
             use_container_width=True, hide_index=True
         )
         st.caption(
-            "Reviewed full rent receipts exclude provisional matches. "
-            "Reviewed split current-rent amounts are shown separately to avoid "
-            "silently applying a payment to an incorrect period. "
-            "Deposits and advances are not deducted from the provisional difference."
+            "The period difference excludes opening balances, split components "
+            "and all provisional payments. Reviewed split current-rent amounts "
+            "are shown separately until their rent periods are verified. "
+            "Advance payments and deposits must never silently reduce this difference."
         )
         with st.expander("Bank credit evidence — classification counts"):
             counts = (
@@ -722,14 +828,27 @@ elif module == "Arrears Payment Reminders":
                 counts.rename_axis("Classification").reset_index(name="Rows"),
                 use_container_width=True, hide_index=True
             )
+        with st.expander("Unverified suggested bank receipts — details"):
+            suggestions = review_credits[
+                review_credits["Allocation_Status"].astype(str).str.startswith(
+                    "Identified (")
+            ].copy()
             st.caption(
-                "Description matches are suggestions until individually reviewed. "
-                "Use Unmapped Payment Auditor for changes to allocations."
+                "These matches are NOT approved. Verify exact bank row, date, "
+                "payer and tenancy in Unmapped Payment Auditor. "
+                "No classification changes are made here."
             )
+            evidence_cols = [
+                c for c in ("Bank_Row_ID", "Transaction Date",
+                            "Transaction Details", "Money In Num",
+                            "Ref_Clean", "Tenancy_ID", "Allocation_Status")
+                if c in suggestions.columns
+            ]
+            st.dataframe(suggestions[evidence_cols], use_container_width=True,
+                         hide_index=True)
         st.warning(
-            "Stage 2 reminder dispatch remains disabled. Verify opening balances, "
-            "payment allocations, rent periods, late fees and contractual terms "
-            "before enabling individual or bulk notices."
+            "Stage 2 remains disabled: balances and receipt periods are not "
+            "fully reconciled, and no reminder may be issued from these figures."
         )
         st.stop()
 
