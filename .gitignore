@@ -50,3 +50,9 @@ tenancy_bank_review_history_v1.json
 # Local owner deposit review and financial evidence (do not publish)
 mowlem_deposit_review.local.json
 mowlem_deposit_review.local.json.tmp
+
+# Stage 1C/1D private evidence and export
+opening_balances_v1.json
+GSIL_v1d_migration_manifest_PRIVATE.json
+*.migration_manifest_PRIVATE.json
+.venv/
