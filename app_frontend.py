@@ -936,8 +936,20 @@ elif module == "Arrears Payment Reminders":
                     "Keep it private; do not commit it to GitHub."
                 )
 
-        # Actionable review stays OUTSIDE read-only Stage 1D.
+        # Stage 1H loads evidence independently; the Stage 1D button is
+        # exclusively for migration inspection, never a prerequisite for action.
         migration_plan_for_clearance = st.session_state.get("v1d_migration_plan")
+        if migration_plan_for_clearance is None:
+            from migration_dryrun_v1d import prepare_local_migration
+            try:
+                migration_plan_for_clearance = prepare_local_migration(
+                    review_register,
+                    backend.df_bank_unfiltered,
+                    opening_data,
+                    "GSIL-KCB-PRIMARY",
+                )
+            except (ValueError, TypeError, OSError, KeyError) as exc:
+                st.error(f"Unable to load cheque evidence for Stage 1H: {exc}")
         if migration_plan_for_clearance:
             from migration_review_v1e import cheque_return_candidates
             returned_cheques = cheque_return_candidates(migration_plan_for_clearance)
@@ -972,6 +984,19 @@ elif module == "Arrears Payment Reminders":
                                 f"{current_review['reviewer']} on "
                                 f"{current_review['reviewed_at_utc']}"
                             )
+                            st.success(
+                                "Decision already recorded. Save is locked to prevent "
+                                "duplicate approvals. An amendment requires an explicit "
+                                "new review and preserves the existing audit entry."
+                            )
+                            amend_review = st.checkbox(
+                                "Amend existing cheque decision (audited)",
+                                key=f"v1h_amend_{pair['credit_row_id'].replace(':', '_')}",
+                            )
+                            if not amend_review:
+                                continue
+                        else:
+                            amend_review = False
                         st.write(
                             f"Return: {pair['credit_row_id']} + {pair['debit_row_id']} "
                             f"(zero net); later credit: {later_credit['bank_row_id']} "
@@ -1079,6 +1104,14 @@ elif module == "Arrears Payment Reminders":
                                 missing_requirements.append("verify the later bank credit")
                             if not reversal_checked:
                                 missing_requirements.append("check for subsequent reversals")
+                        if current_review and (
+                            current_review.get("tenancy_id") == match
+                            and current_review.get("status") == decision
+                        ):
+                            missing_requirements.append(
+                                "change the decision or tenancy; unchanged reviews are already saved"
+                            )
+                            can_save = False
                         if historical_conflict:
                             if not correction_authorized:
                                 missing_requirements.append("authorize historical tenancy correction")
@@ -1118,7 +1151,7 @@ elif module == "Arrears Payment Reminders":
 
         else:
             with st.expander("Stage 1H — Cheque clearance decisions", expanded=True):
-                st.info("First run Analyze local history under Stage 1D to load cheque evidence.")
+                st.error("Cheque evidence could not be loaded; inspect the displayed error.")
 
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
