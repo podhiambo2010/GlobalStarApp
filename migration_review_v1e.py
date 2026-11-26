@@ -71,7 +71,7 @@ def cheque_return_candidates(plan):
         # A reversal must share cheque evidence, not just amount/date.
         reference = str(row.get("reference", "")).strip().lower()
         import re
-        cheque = re.search(r"\\b(?:chq|cheque|check)\\s*(?:no\\.?\\s*)?0*(\\d{3,})\\b",
+        cheque = re.search(r"\b(?:chq|cheque|check)\s*(?:no\.?\s*)?0*(\d{3,})\b",
                            description)
         if not cheque:
             continue
