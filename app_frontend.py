@@ -742,6 +742,62 @@ elif module == "Arrears Payment Reminders":
                 except (ValueError, OSError) as exc:
                     st.error(f"Initialization stopped safely: {exc}")
 
+        with st.expander("Stage 1D — Historical migration dry run (no database writes)"):
+            st.caption(
+                "Inspect historical opening balances, original bank rows, and all "
+                "review/override files before synchronization. This does not "
+                "change local JSON, tenant registers, payments or Supabase."
+            )
+            from migration_dryrun_v1d import (
+                prepare_local_migration, summary_only
+            )
+            if st.button("Analyze local history (read-only)",
+                         key="v1d_dry_run"):
+                try:
+                    plan = prepare_local_migration(
+                        review_register,
+                        backend.df_bank_unfiltered,
+                        opening_data,
+                        "GSIL-KCB-PRIMARY",
+                    )
+                    st.session_state["v1d_migration_plan"] = plan
+                except (ValueError, TypeError, OSError, KeyError) as exc:
+                    st.error(f"Migration stopped safely: {exc}")
+            plan = st.session_state.get("v1d_migration_plan")
+            if plan:
+                st.json(summary_only(plan))
+                missing = plan["summary"]["missing_evidence_files"]
+                if missing:
+                    st.warning(
+                        "Missing local evidence files: " + ", ".join(missing)
+                        + ". Review before any future database import."
+                    )
+                if any(not item.get("valid_json_structure", False)
+                       for item in plan["evidence_inventory"]
+                       if item["exists"]):
+                    st.error("Malformed historical evidence: do not synchronize.")
+                else:
+                    st.info(
+                        "Dry run only. 'New staging candidate' is NOT verified "
+                        "rent and is NOT yet synchronized. Overlapping or "
+                        "identical bank movements must be resolved first."
+                    )
+                st.dataframe(
+                    pd.DataFrame(plan["evidence_inventory"]),
+                    width="stretch", hide_index=True
+                )
+                st.download_button(
+                    "Download Stage 1D migration manifest (sensitive JSON)",
+                    json.dumps(plan, indent=2, ensure_ascii=False),
+                    file_name="GSIL_v1d_migration_manifest_PRIVATE.json",
+                    mime="application/json",
+                    key="v1d_manifest_download",
+                )
+                st.caption(
+                    "This manifest contains tenant names and bank narrations. "
+                    "Keep it private; do not commit it to GitHub."
+                )
+
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
                 "Enter an independently supported balance as at an exact date. "
