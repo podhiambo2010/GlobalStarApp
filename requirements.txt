@@ -9,3 +9,4 @@ python-dotenv
 PyMuPDF
 Pillow
 pytesseract
+xlrd>=2.0.1,<3
