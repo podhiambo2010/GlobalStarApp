@@ -837,6 +837,60 @@ elif module == "Arrears Payment Reminders":
                             "No exact same-day cheque credit/debit candidates "
                             "detected in the currently uploaded bank statement."
                         )
+                with st.expander(
+                    "Stage 1G — Rebanking evidence review (read-only)",
+                    expanded=bool(returned_cheques),
+                ):
+                    st.caption(
+                        "Review each original deposit, its offsetting bank debit, "
+                        "and any later credit separately. A matching cheque number "
+                        "is only a candidate; it is not proof of successful clearance. "
+                        "This screen does not save approvals or change allocations."
+                    )
+                    if not returned_cheques:
+                        st.info("No cheque return pairs are available for review.")
+                    for candidate in returned_cheques:
+                        number = candidate["cheque_number"]
+                        amount = candidate["amount_ksh"]
+                        st.subheader(f"Cheque {number} — KSh {amount}")
+                        st.write(
+                            "Original deposit: ", candidate["credit_row_id"],
+                            " | Returned debit: ", candidate["debit_row_id"]
+                        )
+                        st.caption(
+                            "Original deposit and reversal net to KSh 0. "
+                            "Count neither as collected rent."
+                        )
+                        later = candidate["later_credit_candidates"]
+                        if len(later) == 1:
+                            st.info(
+                                "One later credit candidate found. Verify cheque "
+                                "number, actual credit posting, bank reference and "
+                                "subsequent reversals before accepting as cleared."
+                            )
+                            st.dataframe(
+                                pd.DataFrame(later), width="stretch",
+                                hide_index=True
+                            )
+                        elif len(later) > 1:
+                            st.warning(
+                                f"{len(later)} later credits match. The application "
+                                "cannot decide which represents successful re-banking."
+                            )
+                            st.dataframe(
+                                pd.DataFrame(later), width="stretch",
+                                hide_index=True
+                            )
+                        else:
+                            st.warning(
+                                "No subsequent matching credit found in the uploaded "
+                                "statement. Re-banking is not bank-verified."
+                            )
+                    st.warning(
+                        "Stage 1G remains investigation-only. Do not authorize "
+                        "migration, post rent or remove any original bank movements "
+                        "on the basis of these candidate matches."
+                    )
                 collision_rows = ambiguous_bank_rows(plan)
                 with st.expander(
                     f"Stage 1E — Inspect identical-looking bank movements "
