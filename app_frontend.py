@@ -768,10 +768,33 @@ elif module == "Arrears Payment Reminders":
                 st.json(summary_only(plan))
                 missing = plan["summary"]["missing_evidence_files"]
                 if missing:
-                    st.warning(
-                        "Missing local evidence files: " + ", ".join(missing)
-                        + ". Review before any future database import."
-                    )
+                    if "reassignments.json" in missing:
+                        st.warning(
+                            "Legacy reassignments.json is absent. Git previously "
+                            "reported this tracked file as deleted. Do not create "
+                            "an empty replacement or discard the deletion before "
+                            "checking whether its historical assignments were "
+                            "superseded by tenancy_bank_reviews_v1.json."
+                        )
+                    if "bank_reporting_baseline_v1.json" in missing:
+                        st.info(
+                            "Optional bank reporting-start configuration is absent. "
+                            "The application currently defaults to 21 Sep 2025; "
+                            "your assumed RENT opening balances are dated "
+                            "1 Sep 2025. The bank statement does not establish "
+                            "coverage for 1–20 Sep 2025."
+                        )
+                    other_missing = [
+                        name for name in missing if name not in {
+                            "reassignments.json", "bank_reporting_baseline_v1.json"
+                        }
+                    ]
+                    if other_missing:
+                        st.error(
+                            "Other historical evidence files missing: "
+                            + ", ".join(other_missing)
+                            + ". Review before future database import."
+                        )
                 if any(not item.get("valid_json_structure", False)
                        for item in plan["evidence_inventory"]
                        if item["exists"]):
