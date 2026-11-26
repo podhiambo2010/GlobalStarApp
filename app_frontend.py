@@ -619,12 +619,117 @@ elif module == "Lease PDF AI Extractor & Alerts":
     st.caption("Historical bank reassignment overrides are managed separately from lease extraction. This page cannot erase them.")
 
 elif module == "Arrears Payment Reminders":
-    # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
+    # Stage 1: review-only tenancy-level ledger. No email, SMS, WhatsApp, invoice
+    # or debt-enforcement operation is reachable from this path.
     if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.subheader("Arrears review — tenancy-level (read-only)")
+        st.info(
+            "This is a provisional PERIOD reconciliation, not an arrears demand. "
+            "No reminders can be sent, and no tenant, bank or allocation records "
+            "are changed on this page."
+        )
+        try:
+            review_register, review_credits = backend.tenancy_turnover_report()
+        except (ValueError, KeyError) as exc:
+            st.error(f"Cannot produce a tenancy-level review: {exc}")
+            st.stop()
+
+        review = review_register.copy()
+        for amount_col in (
+            "Expected_Rent", "Actual_Collected", "Provisional_Credits",
+            "Deposit_Received", "Advance_Rent_Received",
+            "Split_Current_Rent_Received"
+        ):
+            if amount_col not in review.columns:
+                review[amount_col] = 0.0
+            review[amount_col] = pd.to_numeric(
+                review[amount_col], errors="coerce").fillna(0.0)
+
+        # A reviewed split may contain current rent, advance rent and deposit.
+        # Show them separately: the receipt's rental period must be verified
+        # before it is recognized as earned income for this reporting period.
+        review["Period_Difference_Before_Split_Application"] = (
+            review["Expected_Rent"] - review["Actual_Collected"]
+        )
+        review["Evidence_State"] = review.apply(
+            lambda row: (
+                "Tenancy record needs review" if bool(row["Review_Required"])
+                else "Opening balance and rent-period verification required"
+            ), axis=1
+        )
         st.warning(
-            "This action is disabled in V1 tenancy-history mode. Current period "
-            "calculations are provisional until tenancy-level bank allocations, "
-            "opening balances, and contractual terms have been verified."
+            "Opening balances, receipts outside the uploaded bank period, "
+            "advance-rent application and contractual penalties have NOT been "
+            "reconciled. The displayed difference is not an enforceable debt. "
+            "Security deposits are liabilities, not rental income."
+        )
+        st.caption(
+            f"Statement window: {backend.statement_start_date} to "
+            f"{backend.statement_end_date}. One line per tenancy ID; "
+            "a tenant occupying two units appears twice."
+        )
+
+        a, b, c, d = st.columns(4)
+        a.metric("Tenancy records", len(review))
+        b.metric("Current occupants (records)", int((review["Report_Status"] == "Current").sum()))
+        c.metric("Former tenancies (records)", int((review["Report_Status"] == "Former").sum()))
+        d.metric("Records needing review", int(review["Review_Required"].sum()))
+
+        status_options = ["All"] + sorted(
+            str(x) for x in review["Report_Status"].dropna().unique()
+        )
+        chosen_status = st.selectbox(
+            "Filter tenancy status", status_options, key="arrears_stage1_status"
+        )
+        if chosen_status != "All":
+            review = review[review["Report_Status"] == chosen_status].copy()
+
+        display_columns = {
+            "Shop #": "Unit",
+            "Tenancy_ID": "Tenancy ID",
+            "Tenant Name": "Tenant",
+            "Report_Status": "Occupancy",
+            "Lease_Date_Parsed": "Lease start",
+            "End_Actual": "Actual departure",
+            "Rent_Rate": "Monthly rent (KSh)",
+            "Expected_Rent": "Expected period rent (KSh)",
+            "Actual_Collected": "Reviewed full rent receipts (KSh)",
+            "Split_Current_Rent_Received": "Reviewed split current rent (KSh)",
+            "Advance_Rent_Received": "Advance rent held (KSh)",
+            "Deposit_Received": "Deposit liability received (KSh)",
+            "Provisional_Credits": "Suggested receipts — unverified (KSh)",
+            "Period_Difference_Before_Split_Application": "Provisional difference (KSh)",
+            "Evidence_State": "Verification status",
+        }
+        available = [key for key in display_columns if key in review.columns]
+        st.dataframe(
+            review[available].rename(columns=display_columns),
+            use_container_width=True, hide_index=True
+        )
+        st.caption(
+            "Reviewed full rent receipts exclude provisional matches. "
+            "Reviewed split current-rent amounts are shown separately to avoid "
+            "silently applying a payment to an incorrect period. "
+            "Deposits and advances are not deducted from the provisional difference."
+        )
+        with st.expander("Bank credit evidence — classification counts"):
+            counts = (
+                review_credits["Allocation_Status"].value_counts()
+                if "Allocation_Status" in review_credits.columns
+                else pd.Series(dtype="int64")
+            )
+            st.dataframe(
+                counts.rename_axis("Classification").reset_index(name="Rows"),
+                use_container_width=True, hide_index=True
+            )
+            st.caption(
+                "Description matches are suggestions until individually reviewed. "
+                "Use Unmapped Payment Auditor for changes to allocations."
+            )
+        st.warning(
+            "Stage 2 reminder dispatch remains disabled. Verify opening balances, "
+            "payment allocations, rent periods, late fees and contractual terms "
+            "before enabling individual or bulk notices."
         )
         st.stop()
 
