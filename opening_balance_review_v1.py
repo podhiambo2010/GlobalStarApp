@@ -52,7 +52,7 @@ def record_opening(path, tenancy_id, as_of, signed_amount, evidence, actor="Loca
         return False
     data["balances"][key] = updated
     data["history"].append({
-        "action": "opening_verified" if previous is None else "opening_revised",
+        "action": "opening_recorded" if previous is None else "opening_revised",
         "previous": previous, "new": updated,
     })
     directory = os.path.dirname(os.path.abspath(path))
@@ -72,7 +72,7 @@ def record_opening(path, tenancy_id, as_of, signed_amount, evidence, actor="Loca
 
 def evidence_view(register, data, reporting_start):
     """Join exact tenancy IDs; flag dates rather than adding incompatible figures."""
-    from pandas import DataFrame, to_datetime, to_numeric
+    from pandas import to_numeric
     frame = register.copy()
     balance = data.get("balances", {})
     frame["Opening_Balance_KSh"] = frame["Tenancy_ID"].map(
