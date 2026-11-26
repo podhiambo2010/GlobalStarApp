@@ -262,6 +262,7 @@ class TenantPortalBackend:
         self.statement_period_str = ""
         self.statement_start_date = None
         self.statement_end_date = None
+        self.statement_period_source = None
         self.statement_day = 31
         self.statement_month_str = "July 2026"
         self.overrides = self.load_json(self.override_json_path)
@@ -452,6 +453,7 @@ class TenantPortalBackend:
                 match = re.search(r'(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})', full_text)
                 if match:
                     self.statement_period_str = match.group(0)
+                    self.statement_period_source = "header"
                     self.statement_start_date = datetime.strptime(match.group(1), "%d/%m/%Y")
                     self.statement_end_date = datetime.strptime(match.group(2), "%d/%m/%Y")
                     self.statement_day = self.statement_end_date.day
@@ -481,6 +483,36 @@ class TenantPortalBackend:
         columns = [str(c).strip() for c in df_raw.iloc[h_idx].values]
         self.df_bank = pd.read_excel(xls, sheet_name=sheet_name, skiprows=h_idx+1)
         self.df_bank.columns = [str(c).strip() for c in columns]
+        if self.statement_start_date is None or self.statement_end_date is None:
+            # Older KCB exports may omit the statement-period heading. Use only
+            # dates observed in transaction rows; never claim full bank coverage.
+            date_column = next(
+                (col for col in self.df_bank.columns
+                 if str(col).strip().lower() == "transaction date"), None)
+            if date_column is None:
+                xls.close()
+                raise ValueError(
+                    "KCB statement period is absent and 'Transaction Date' is missing. "
+                    "Please upload an itemised bank statement with transaction dates."
+                )
+            observed = pd.to_datetime(
+                self.df_bank[date_column], errors="coerce", dayfirst=True)
+            observed = observed.dropna()
+            if observed.empty:
+                xls.close()
+                raise ValueError(
+                    "The bank workbook contains no readable transaction dates. "
+                    "Check that the original KCB export is selected."
+                )
+            self.statement_start_date = observed.min().to_pydatetime()
+            self.statement_end_date = observed.max().to_pydatetime()
+            self.statement_period_source = "transaction_dates"
+            self.statement_period_str = (
+                f"{self.statement_start_date:%d/%m/%Y} - "
+                f"{self.statement_end_date:%d/%m/%Y}"
+            )
+            self.statement_day = self.statement_end_date.day
+            self.statement_month_str = self.statement_end_date.strftime("%B %Y")
         xls.close()
         
         col_map = {c.lower(): c for c in self.df_bank.columns}
