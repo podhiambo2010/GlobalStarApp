@@ -74,7 +74,25 @@ if module == "Dashboard & Arrears":
     from statement_period_v1 import load_baseline, save_baseline, coverage_message
     baseline_path = "bank_reporting_baseline_v1.json"
     pinned_start = load_baseline(baseline_path)
-    st.caption(f"Detected KCB statement period: {backend.statement_start_date:%d %b %Y} — {backend.statement_end_date:%d %b %Y} (from the workbook header).")
+    if backend.statement_start_date is not None and backend.statement_end_date is not None:
+        if getattr(backend, "statement_period_source", None) == "transaction_dates":
+            st.warning(
+                f"No KCB statement period header was detected. Transactions in this file "
+                f"are dated from {backend.statement_start_date:%d %b %Y} to "
+                f"{backend.statement_end_date:%d %b %Y}. These are observed transaction "
+                "dates, NOT confirmation that the statement covers the entire interval."
+            )
+        else:
+            st.caption(
+                f"Detected KCB statement period: {backend.statement_start_date:%d %b %Y} "
+                f"— {backend.statement_end_date:%d %b %Y} (from the workbook header)."
+            )
+    else:
+        st.error(
+            "No reliable bank statement period was found. Use an itemised KCB statement "
+            "with readable transaction dates; no accounting totals will be inferred."
+        )
+        st.stop()
     with st.expander("Pinned reporting start — Bank baseline", expanded=False):
         selected_baseline = st.date_input("Pinned starting date", value=pinned_start,
             key="pinned_kcb_start")
@@ -93,7 +111,7 @@ if module == "Dashboard & Arrears":
     if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
         register, credits = backend.tenancy_turnover_report()
         st.info(
-            f"Excel-only tenancy history. Reporting period: "
+            f"Excel-only tenancy history. Transaction-date reporting window: "
             f"{backend.statement_start_date:%d %b %Y} to "
             f"{backend.statement_end_date:%d %b %Y}. "
             "These are period figures, NOT confirmed lifetime arrears."
