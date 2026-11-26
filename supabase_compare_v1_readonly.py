@@ -10,6 +10,9 @@ import os
 
 SCHEMA = "gs_streamlit_v1"
 EXPECTED_ROLE = "gs_streamlit_v1_login"
+PROJECT_REF = "ububmwidtfcrdzycgqdf"
+POOLER_HOST = "aws-0-eu-central-1.pooler.supabase.com"
+DIRECT_HOST = f"db.{PROJECT_REF}.supabase.co"
 TABLES = (
     "tenancies", "opening_rent_balances", "deposit_accounts",
     "import_batches", "bank_movements", "batch_movements",
@@ -54,9 +57,15 @@ def read_remote_state(dsn=None):
         import psycopg2
     except ImportError as exc:
         raise RuntimeError("Install psycopg2-binary from requirements.txt") from exc
+    params = psycopg2.extensions.parse_dsn(dsn)
+    host = params.get("host", "")
+    username = params.get("user", "")
+    if not ((host == POOLER_HOST and username == f"{EXPECTED_ROLE}.{PROJECT_REF}")
+            or (host == DIRECT_HOST and username == EXPECTED_ROLE)):
+        raise PermissionError("Only the dedicated GlobalStar Streamlit database endpoint and login are allowed")
     counts = {}
     fingerprints = []
-    # The client enforces both TLS and a bounded query timeout.
+    # TLS-encrypted connection with bounded timeouts; no data mutation.
     with psycopg2.connect(
         dsn=dsn, sslmode="require", connect_timeout=8,
         options="-c statement_timeout=8000",
