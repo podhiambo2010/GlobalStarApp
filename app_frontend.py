@@ -693,6 +693,55 @@ elif module == "Arrears Payment Reminders":
                 "Identified (").sum())
         )
 
+        with st.expander("Stage 1C — Initialize historical zero-rent baseline"):
+            st.caption(
+                "Effective 1 September 2025. This records an owner-authorized "
+                "ASSUMPTION, not evidence that historical arrears or credits did "
+                "not exist. Deposits are managed separately. Existing reviewed "
+                "opening balances will not be overwritten."
+            )
+            eligible_baseline = review[
+                (pd.to_datetime(review["Lease_Date_Parsed"], errors="coerce")
+                 <= pd.Timestamp("2025-09-01"))
+                & (review["Tenancy_Status"].astype(str) != "vacancy")
+                & (~review["Review_Required"].astype(bool))
+            ].copy()
+            missing_baseline = eligible_baseline[
+                ~eligible_baseline["Tenancy_ID"].astype(str).isin(
+                    opening_data["balances"].keys())
+            ]
+            st.write(
+                f"Eligible commenced tenancies: {len(eligible_baseline)}; "
+                f"new zero-opening entries: {len(missing_baseline)}."
+            )
+            acknowledged = st.checkbox(
+                "I authorize assumed KSh 0 opening RENT balances for eligible "
+                "tenancies as of 1 Sep 2025; verified exceptions remain unchanged.",
+                key="confirm_bulk_zero_baseline"
+            )
+            if st.button(
+                "Initialize missing zero RENT balances (local evidence register)",
+                disabled=not acknowledged or missing_baseline.empty,
+                key="init_bulk_zero_baseline"
+            ):
+                count = 0
+                try:
+                    for tenancy_id in missing_baseline["Tenancy_ID"].astype(str):
+                        if record_opening(
+                            evidence_path, tenancy_id, date_type(2025, 9, 1),
+                            0, "Owner-authorized assumed opening RENT balance "
+                               "at 1 September 2025; historical debts and credits "
+                               "not independently verified.", getpass.getuser()
+                        ):
+                            count += 1
+                    st.success(
+                        f"Recorded {count} missing zero-rent openings with audit history. "
+                        "No deposit, payment or bank movement was altered."
+                    )
+                    st.rerun()
+                except (ValueError, OSError) as exc:
+                    st.error(f"Initialization stopped safely: {exc}")
+
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
                 "Enter an independently supported balance as at an exact date. "
