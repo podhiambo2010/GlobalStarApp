@@ -1153,6 +1153,12 @@ elif module == "Arrears Payment Reminders":
             with st.expander("Stage 1H — Cheque clearance decisions", expanded=True):
                 st.error("Cheque evidence could not be loaded; inspect the displayed error.")
 
+        if migration_plan_for_clearance:
+            with st.expander("Stage 1I — Cleared cheque rent allocation (audited)", expanded=True):
+                from cheque_allocation_ui_v1i import render_stage_1i
+                render_stage_1i(returned_cheques, review_register)
+
+
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
                 "Enter an independently supported balance as at an exact date. "
