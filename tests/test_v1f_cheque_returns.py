@@ -28,6 +28,26 @@ class ChequeReturnTests(unittest.TestCase):
         self.assertEqual(candidates[0]["debit_row_id"], "b")
         self.assertEqual(repr(plan), before)
 
+    def test_later_successful_rebank_credit_is_separate_candidate(self):
+        later_mash = row("mash-rebank", 60000, 4525)
+        later_mash["transaction_date"] = "2025-11-11"
+        later_dream = row("dream-rebank", 30000, 4680)
+        later_dream["transaction_date"] = "2025-11-11"
+        plan = {"mode": "DRY_RUN_ONLY_NO_DB_WRITES",
+                "bank_movements": [
+                    row("dream-original", 30000, 4680),
+                    row("mash-original", 60000, 4525),
+                    row("mash-returned", -60000, 4525),
+                    row("dream-returned", -30000, 4680),
+                    later_mash, later_dream,
+                ]}
+        pairs = cheque_return_candidates(plan)
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual({p["cheque_number"] for p in pairs}, {"4525", "4680"})
+        self.assertTrue(all(len(p["later_credit_candidates"]) == 1 for p in pairs))
+        self.assertEqual({p["later_credit_candidates"][0]["bank_row_id"]
+                          for p in pairs}, {"dream-rebank", "mash-rebank"})
+
     def test_different_cheque_or_amount_is_not_assumed_reversal(self):
         plan = {"mode": "DRY_RUN_ONLY_NO_DB_WRITES",
                 "bank_movements": [row("a", 30000, 4680), row("b", -30000, 4681),
