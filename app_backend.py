@@ -569,7 +569,6 @@ class TenantPortalBackend:
             )
             self.statement_day = self.statement_end_date.day
             self.statement_month_str = self.statement_end_date.strftime("%B %Y")
-        xls.close()
         
         col_map = {c.lower(): c for c in self.df_bank.columns}
         money_in_col = col_map.get('money in', next((c for c in self.df_bank.columns if 'money in' in c.lower() or 'credit' in c.lower()), 'Money In'))
@@ -627,6 +626,7 @@ class TenantPortalBackend:
                     on='Ref_Clean', 
                     how='left'
                 )
+        xls.close()
 
         def is_valid_credit(row):
             ref = row['Ref_Clean']
