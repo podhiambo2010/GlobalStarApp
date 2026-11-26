@@ -57,16 +57,19 @@ def plan_statement_import(account_key, rows, existing_fingerprints=()):
                          row.get("unique_bank_id"))
         prepared.append((fp, row))
     counts = Counter(fp for fp, _ in prepared)
-    staged, duplicated, ambiguous = [], [], []
+    staged, duplicated, ambiguous, possible_overlap = [], [], [], []
     for fp, row in prepared:
         result = {"fingerprint": fp, "row": row}
         if counts[fp] > 1 and not row.get("unique_bank_id"):
             ambiguous.append(result)
-        elif fp in existing:
+        elif fp in existing and row.get("unique_bank_id"):
             duplicated.append(result)
+        elif fp in existing:
+            possible_overlap.append(result)
         else:
             staged.append(result)
     return {"new": staged, "already_seen": duplicated,
+            "possible_overlap": possible_overlap,
             "ambiguous_same_statement": ambiguous}
 
 
