@@ -120,5 +120,76 @@ class ClearedChequeAllocationTests(unittest.TestCase):
             self.allocate()
 
 
+    def test_quarterly_cheque_allocates_once_to_three_months(self):
+        # Isolate new cheque from Dreamline to verify the quarter independently.
+        second = dict(self.later, bank_row_id="later-mash-52", amount_ksh="60000.00",
+                      reference="FT25315X5FFZ")
+        pair = dict(self.pair, cheque_number="4525", amount_ksh="60000.00",
+                    credit_row_id="mash-original-47", debit_row_id="mash-return-50",
+                    later_credit_candidates=[second])
+        record_clearance(
+            self.clearance, pair, second,
+            tenancy_id="mash-unit-3", tenant_name="Mash East Africa",
+            status="bank_cleared_pending_allocation", reviewer="Bank Manager",
+            explanation="Verified Mash successful later credit without reversal",
+            verified_bank_posting=True, checked_no_later_reversal=True,
+        )
+        periods = [
+            {"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+            {"rent_period": "2025-12-01", "amount_ksh": "20000.00"},
+            {"rent_period": "2026-01-01", "amount_ksh": "20000.00"},
+        ]
+        kwargs = dict(
+            successful_credit_row_id="later-mash-52", tenancy_id="mash-unit-3",
+            rent_period="2025-11-01", amount_ksh="60000.00",
+            allocations=periods, reviewer="Bank Manager",
+            explanation="Quarterly rent for Nov Dec and Jan confirmed by owner",
+            verified_period=True, verified_amount=True, confirmed=True,
+        )
+        event = record_allocation(self.allocation, self.clearance, **kwargs)
+        self.assertEqual(event["allocations"], periods)
+        self.assertFalse(event["rent_posted"])
+        self.assertEqual(len(latest_allocations(self.allocation)), 1)
+        with self.assertRaises(ValueError):
+            record_allocation(self.allocation, self.clearance, **kwargs)
+        self.assertEqual(len(json.loads(self.allocation.read_text())["history"]), 1)
+        self.assertEqual(len(json.loads(self.clearance.read_text())["history"]), 2)
+
+    def test_quarterly_mismatch_rejected(self):
+        second = dict(self.later, bank_row_id="later-mash-52", amount_ksh="60000.00")
+        pair = dict(self.pair, cheque_number="4525", amount_ksh="60000.00",
+                    credit_row_id="mash-original-47", debit_row_id="mash-return-50",
+                    later_credit_candidates=[second])
+        record_clearance(
+            self.clearance, pair, second,
+            tenancy_id="mash-unit-3", tenant_name="Mash East Africa",
+            status="bank_cleared_pending_allocation", reviewer="Bank Manager",
+            explanation="Verified Mash successful later credit without reversal",
+            verified_bank_posting=True, checked_no_later_reversal=True,
+        )
+        baseline = dict(
+            successful_credit_row_id="later-mash-52", tenancy_id="mash-unit-3",
+            rent_period="2025-11-01", amount_ksh="60000.00",
+            reviewer="Bank Manager",
+            explanation="Quarterly rent confirmed by the owner and lease evidence",
+            verified_period=True, verified_amount=True, confirmed=True,
+        )
+        invalids = [
+            [{"rent_period": "2025-11-01", "amount_ksh": "60000.00"}],
+            [{"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+             {"rent_period": "2025-12-01", "amount_ksh": "20000.00"},
+             {"rent_period": "2026-01-01", "amount_ksh": "19000.00"}],
+            [{"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+             {"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+             {"rent_period": "2026-01-01", "amount_ksh": "20000.00"}],
+        ]
+        for parts in invalids:
+            with self.subTest(parts=parts), self.assertRaises(ValueError):
+                record_allocation(self.allocation, self.clearance,
+                                  allocations=parts, **baseline)
+        self.assertFalse(self.allocation.exists())
+
+
+
 if __name__ == "__main__":
     unittest.main()
