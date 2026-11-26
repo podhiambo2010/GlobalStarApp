@@ -16,7 +16,7 @@ def render_section_03(plan):
         if not plan or not comparison:
             st.info("Run Section 02 read-only comparison before preparing the Section 03 preview.")
             return
-        if st.button("Prepare Section 03 preview (no changes)", key="v1_section03_preview"):
+        if st.button("Prepare Section 03 preview (no changes)", key="v1_section03_prepare_button"):
             try:
                 preview = build_migration_preview(plan, comparison)
             except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
