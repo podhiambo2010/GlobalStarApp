@@ -98,4 +98,32 @@ def cheque_return_candidates(plan):
             "net_amount_ksh": "0.00",
             "review_status": "PROPOSED_RETURN_PAIR — verify against bank",
         })
+    # Later credits may be successful re-bankings, but must be tied to
+    # the original cheque evidence rather than approved automatically.
+    for candidate in candidates:
+        rebound = []
+        for row_position, row in enumerate(rows, 1):
+            if row_position in (candidate["credit_source_row"], candidate["debit_source_row"]):
+                continue
+            amount = Decimal(str(row["amount"]))
+            if amount != Decimal(candidate["amount_ksh"]) or amount <= 0:
+                continue
+            desc = " ".join(str(row.get("description", "")).lower().split())
+            match = re.search(r"\b(?:chq|cheque|check)\s*(?:no\.?\s*)?0*(\d{3,})\b", desc)
+            if not match or match.group(1) != candidate["cheque_number"]:
+                continue
+            if str(row["transaction_date"]) <= str(candidate["transaction_date"]):
+                continue
+            rebound.append({
+                "source_row": row_position,
+                "bank_row_id": row.get("legacy_bank_row_id", ""),
+                "date": row["transaction_date"],
+                "amount_ksh": str(amount),
+                "reference": row.get("reference", ""),
+            })
+        candidate["later_credit_candidates"] = rebound
+        candidate["rebank_review_status"] = (
+            "ONE_LATER_CREDIT_CANDIDATE — verify bank posting"
+            if len(rebound) == 1 else "REQUIRES_MANUAL_REBANK_REVIEW"
+        )
     return candidates
