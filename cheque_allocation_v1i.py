@@ -60,7 +60,7 @@ def eligible_clearance(clearance_path, successful_credit_row_id):
 def record_allocation(path, clearance_path, *, successful_credit_row_id,
                       tenancy_id, rent_period, amount_ksh, reviewer,
                       explanation, verified_period, verified_amount,
-                      confirmed, amend=False, correction_reason=""):
+                      confirmed, amend=False, correction_reason="", allocations=None):
     source = eligible_clearance(clearance_path, successful_credit_row_id)
     if str(tenancy_id) != str(source["tenancy_id"]):
         raise ValueError("Tenancy differs from the current Stage 1H clearance")
@@ -69,15 +69,58 @@ def record_allocation(path, clearance_path, *, successful_credit_row_id,
     if len(str(reviewer).strip()) < 3 or len(str(explanation).strip()) < 15:
         raise ValueError("Reviewer and allocation evidence (15+ characters) required")
     try:
-        period = date.fromisoformat(str(rent_period))
-        amount = Decimal(str(amount_ksh)).quantize(Decimal("0.01"))
-        credit = Decimal(str(source["amount_ksh"])).quantize(Decimal("0.01"))
-    except (ValueError, InvalidOperation) as exc:
-        raise ValueError("Invalid rent period or monetary value") from exc
-    if period.day != 1:
-        raise ValueError("Rent period must be the first day of the corresponding month")
-    if amount <= 0 or amount != credit:
-        raise ValueError("This workflow allocates the complete cheque credit only")
+        credit = Decimal(str(source["amount_ksh"]))
+        amount = Decimal(str(amount_ksh))
+        if (not credit.is_finite() or not amount.is_finite()
+                or credit <= 0 or amount != credit
+                or amount.as_tuple().exponent < -2):
+            raise ValueError("Allocation must equal the full cleared credit to 2 decimal places")
+        amount = amount.quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError) as exc:
+        raise ValueError("Invalid monetary value") from exc
+
+    # Each bank receipt has ONE approval event, with one or more monthly
+    # components. Legacy single-month events remain readable and untouched.
+    if allocations is None:
+        allocations = [{"rent_period": rent_period, "amount_ksh": str(amount)}]
+    if not isinstance(allocations, (list, tuple)) or not allocations:
+        raise ValueError("At least one rent-period allocation is required")
+    if len(allocations) > 24:
+        raise ValueError("Too many rent periods for one receipt")
+    components = []
+    seen_periods = set()
+    total = Decimal("0.00")
+    for entry in allocations:
+        if not isinstance(entry, dict):
+            raise ValueError("Each rent allocation must be an object")
+        try:
+            period = date.fromisoformat(str(entry["rent_period"]))
+            raw_component = Decimal(str(entry["amount_ksh"]))
+        except (KeyError, InvalidOperation, ValueError, TypeError) as exc:
+            raise ValueError("Invalid rent period or monetary component") from exc
+        if period.day != 1 or period.isoformat() in seen_periods:
+            raise ValueError("Rent periods must be unique first-of-month dates")
+        if (not raw_component.is_finite() or raw_component <= 0
+                or raw_component.as_tuple().exponent < -2):
+            raise ValueError("Each monthly allocation must be positive with 2-decimal precision")
+        component_amount = raw_component.quantize(Decimal("0.01"))
+        components.append({"rent_period": period.isoformat(),
+                           "amount_ksh": str(component_amount)})
+        seen_periods.add(period.isoformat())
+        total += component_amount
+    if total != amount:
+        raise ValueError("Monthly allocations must sum to the exact cleared bank credit")
+    # The period passed by older callers must be the first allocation period.
+    if str(rent_period) != components[0]["rent_period"]:
+        raise ValueError("Primary rent period must match the first allocation component")
+    if str(source["cheque_number"]) == "4525":
+        expected = [
+            {"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+            {"rent_period": "2025-12-01", "amount_ksh": "20000.00"},
+            {"rent_period": "2026-01-01", "amount_ksh": "20000.00"},
+        ]
+        if components != expected:
+            raise ValueError("Cheque 4525 requires the verified Nov-Jan quarterly allocation of KSh 20,000 each")
     if str(source["successful_credit_date"]) != "2025-11-11":
         raise ValueError("Expected successful posting on 11 November 2025")
     data = _load(path)
@@ -90,8 +133,11 @@ def record_allocation(path, clearance_path, *, successful_credit_row_id,
         raise ValueError("Amendment requires a reason of at least 20 characters")
     if latest and latest.get("status") != STATUS:
         raise ValueError("Prior allocation is in an unexpected state; investigate")
+    prior_components = (latest.get("allocations") or [
+        {"rent_period": latest.get("rent_period"), "amount_ksh": latest.get("amount_ksh")}
+    ]) if latest else []
     if latest and (str(latest.get("tenancy_id")) == str(tenancy_id)
-                   and latest.get("rent_period") == period.isoformat()
+                   and prior_components == components
                    and latest.get("amount_ksh") == str(amount)):
         raise ValueError("Allocation is unchanged; no duplicate audit event permitted")
     event = {
@@ -105,7 +151,8 @@ def record_allocation(path, clearance_path, *, successful_credit_row_id,
         "successful_credit_date": str(source["successful_credit_date"]),
         "tenancy_id": str(tenancy_id),
         "tenant_name": str(source["tenant_name"]),
-        "rent_period": period.isoformat(),
+        "rent_period": components[0]["rent_period"],
+        "allocations": components,
         "amount_ksh": str(amount),
         "reviewer": str(reviewer).strip(),
         "explanation": str(explanation).strip(),
