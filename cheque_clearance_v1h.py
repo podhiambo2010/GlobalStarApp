@@ -40,7 +40,7 @@ def _check_candidate(candidate, later):
 
 def record_clearance(path, candidate, later, *, tenancy_id, tenant_name,
                      status, reviewer, explanation, verified_bank_posting,
-                     checked_no_later_reversal):
+                     checked_no_later_reversal, corrective_review=False, correction_reason=""):
     """Append a review event, retaining any earlier decision as historical evidence.
 
     No record is created unless the reviewer explicitly confirms both bank
@@ -83,12 +83,25 @@ def record_clearance(path, candidate, later, *, tenancy_id, tenant_name,
         "rent_posted": False,
         "allocation_approved": False,
     }
-    # A bank credit must not be claimed by two different cheques/tenancies.
-    for previous in data["history"]:
-        if (previous.get("successful_credit_row_id") == event["successful_credit_row_id"]
-            and (previous.get("original_credit_row_id") != event["original_credit_row_id"]
-                 or previous.get("tenancy_id") != event["tenancy_id"])):
-            raise ValueError("This later credit has a conflicting historical review")
+    # Keep the original review. An explicit correction may change the tenancy
+    # only for the SAME cheque and the SAME later bank credit.
+    conflicts = [
+        old for old in data["history"]
+        if old.get("successful_credit_row_id") == event["successful_credit_row_id"]
+        and (old.get("original_credit_row_id") != event["original_credit_row_id"]
+             or old.get("tenancy_id") != event["tenancy_id"])
+    ]
+    if conflicts:
+        if any(old.get("original_credit_row_id") != event["original_credit_row_id"]
+               for old in conflicts):
+            raise ValueError("Later credit assigned to another cheque; investigate")
+        if not corrective_review or len(str(correction_reason).strip()) < 20:
+            raise ValueError("Historical tenancy conflict: confirm correction and give a reason (20+ characters)")
+        event["corrects_prior_tenancy"] = True
+        event["correction_reason"] = str(correction_reason).strip()
+        event["previous_tenancy_ids"] = sorted({str(old["tenancy_id"]) for old in conflicts})
+    elif corrective_review:
+        raise ValueError("No historical tenancy mismatch to correct")
     if data["history"] and data["history"][-1] == event:
         return event
     data["history"].append(event)
