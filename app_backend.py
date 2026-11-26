@@ -442,47 +442,103 @@ class TenantPortalBackend:
         if hasattr(self.bank_path, 'seek'):
             self.bank_path.seek(0)
         xls = pd.ExcelFile(self.bank_path)
-        sheet_name = 'Bank Statement' if 'Bank Statement' in xls.sheet_names else xls.sheet_names[0]
-        
-        df_raw = pd.read_excel(xls, sheet_name=sheet_name)
-        
-        for row_idx in range(min(25, len(df_raw))):
-            cell_val = str(df_raw.iloc[row_idx, 0])
-            if 'Period:' in cell_val or 'Period' in str(df_raw.iloc[row_idx, 0]):
-                full_text = str(df_raw.iloc[row_idx, 0]) + " " + str(df_raw.iloc[row_idx, 1])
-                match = re.search(r'(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})', full_text)
-                if match:
-                    self.statement_period_str = match.group(0)
-                    self.statement_period_source = "header"
-                    self.statement_start_date = datetime.strptime(match.group(1), "%d/%m/%Y")
-                    self.statement_end_date = datetime.strptime(match.group(2), "%d/%m/%Y")
-                    self.statement_day = self.statement_end_date.day
-                    self.statement_month_str = self.statement_end_date.strftime("%B %Y")
-                    print(f"DEBUG BANK STATEMENT: Start -> {self.statement_start_date.strftime('%Y-%m-%d')}, End -> {self.statement_end_date.strftime('%Y-%m-%d')}")
-                    break
-        
-        h_idx = 13
-        for idx in range(len(df_raw)):
-            row_vals = [str(v) for v in df_raw.iloc[idx].values]
-            if 'Transaction Date' in row_vals or 'Bank Reference Number' in row_vals:
-                h_idx = idx
-                break
+        # Recognize KCB's standard table and historical/legacy export headings.
+        # Require date, narrative, and actual debit/credit columns; do not accept
+        # a tenant workbook or summary-only table as bank transactions.
+        def _heading(value):
+            return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
 
-        if h_idx == 13 and not any(
-            "Transaction Date" in [str(v).strip() for v in df_raw.iloc[idx].values]
-            or "Bank Reference Number" in [str(v).strip() for v in df_raw.iloc[idx].values]
-            for idx in range(len(df_raw))
-        ):
+        aliases = {
+            "Transaction Date": {"transaction date", "trans date", "date", "posting date", "posted date"},
+            "Value Date": {"value date"},
+            "Transaction Details": {"transaction details", "transaction description", "description",
+                                    "details", "narration", "narrative", "particulars"},
+            "Bank Reference Number": {"bank reference number", "bank reference", "reference",
+                                      "reference number", "transaction reference", "ref no", "ref"},
+            "Money In": {"money in", "credit", "credits", "credit amount", "deposit",
+                         "deposits", "paid in", "amount in"},
+            "Money Out": {"money out", "debit", "debits", "debit amount",
+                          "withdrawal", "withdrawals", "paid out", "amount out"},
+        }
+
+        def _find_columns(values):
+            found = {}
+            for index, value in enumerate(values):
+                norm = _heading(value)
+                for canonical, possibilities in aliases.items():
+                    if norm in possibilities and canonical not in found:
+                        found[canonical] = index
+                        break
+            return found
+
+        sheet_name = None
+        header_idx = None
+        header_fields = None
+        seen_candidates = []
+        for candidate in (["Bank Statement"] if "Bank Statement" in xls.sheet_names else []) + [
+            name for name in xls.sheet_names if name != "Bank Statement"
+        ]:
+            probe = pd.read_excel(xls, sheet_name=candidate, header=None, nrows=80)
+            for index, values in probe.iterrows():
+                field_positions = _find_columns(values.tolist())
+                sufficient = all(key in field_positions for key in
+                                 ("Transaction Date", "Transaction Details", "Money In", "Money Out"))
+                if sufficient:
+                    sheet_name = candidate
+                    header_idx = index
+                    header_fields = field_positions
+                    break
+                if len(field_positions) >= 2:
+                    seen_candidates.append((candidate, index + 1, sorted(field_positions)))
+            if sheet_name is not None:
+                break
+        if sheet_name is None:
             xls.close()
+            detail = (
+                f" Closest rows inspected: {seen_candidates[:3]}."
+                if seen_candidates else
+                " No recognizable transaction columns were found in the first 80 rows of any sheet."
+            )
             raise ValueError(
-                "The uploaded Bank Statement workbook does not contain a KCB "
-                "transaction header. It may be a tenants workbook. Please upload "
-                "KCB_Bank_Statement.xlsx under 'Upload Bank Statement (Excel)'."
+                "This workbook has no recognizable itemised KCB transaction table. "
+                "Required: transaction date, description, money in/credit, money out/debit. "
+                "A summary, tenants register, or unsupported layout cannot be imported."
+                + detail
             )
 
-        columns = [str(c).strip() for c in df_raw.iloc[h_idx].values]
-        self.df_bank = pd.read_excel(xls, sheet_name=sheet_name, skiprows=h_idx+1)
-        self.df_bank.columns = [str(c).strip() for c in columns]
+        # Use header=None so row numbers are independent of Excel's header guess.
+        full_sheet = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+        date_pattern = re.compile(r"(\\d{2}/\\d{2}/\\d{4})\\s*[-–]\\s*(\\d{2}/\\d{2}/\\d{4})")
+        for _, values in full_sheet.head(min(80, len(full_sheet))).iterrows():
+            combined = " ".join(str(value) for value in values if pd.notna(value))
+            if "period" not in combined.lower():
+                continue
+            match = date_pattern.search(combined)
+            if match:
+                self.statement_period_str = match.group(0)
+                self.statement_period_source = "header"
+                self.statement_start_date = datetime.strptime(match.group(1), "%d/%m/%Y")
+                self.statement_end_date = datetime.strptime(match.group(2), "%d/%m/%Y")
+                self.statement_day = self.statement_end_date.day
+                self.statement_month_str = self.statement_end_date.strftime("%B %Y")
+                break
+
+        original_headers = full_sheet.iloc[header_idx].tolist()
+        renamed = [
+            next((canonical for canonical, position in header_fields.items()
+                  if position == index), str(value).strip())
+            for index, value in enumerate(original_headers)
+        ]
+        self.df_bank = full_sheet.iloc[header_idx + 1:].copy()
+        self.df_bank.columns = renamed
+        self.df_bank = self.df_bank.reset_index(drop=True)
+        # The original ref remains mandatory for safe bank-row provenance.
+        if "Bank Reference Number" not in self.df_bank.columns:
+            xls.close()
+            raise ValueError(
+                f"Found transaction rows in sheet '{sheet_name}', but no bank reference "
+                "column. Cannot safely identify historical bank rows for review."
+            )
         if self.statement_start_date is None or self.statement_end_date is None:
             # Older KCB exports may omit the statement-period heading. Use only
             # dates observed in transaction rows; never claim full bank coverage.
