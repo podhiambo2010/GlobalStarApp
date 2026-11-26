@@ -45,6 +45,33 @@ class MigrationDryRunTests(unittest.TestCase):
         result = bank_overlap_dry_run(rows, "KCB-1")
         self.assertEqual(result[0]["amount"], "-6000.00")
 
+    def test_negative_money_out_is_still_a_debit(self):
+        rows = self.rows.copy()
+        rows["Money In Num"] = 0
+        rows["Money Out Num"] = -60000
+        result = bank_overlap_dry_run(rows, "KCB-1")
+        self.assertEqual(result[0]["direction"], "debit")
+        self.assertEqual(result[0]["amount"], "-60000.00")
+
+    def test_rebanked_cheques_detected_from_negative_outgoing_bank_column(self):
+        from migration_review_v1e import cheque_return_candidates
+        rows = pd.DataFrame([
+            ("2025-11-10", 30000, 0, "Chq Dep CHQ004680 DREAMLINE", "FT25314B23L2", "c1"),
+            ("2025-11-10", 60000, 0, "Chq Dep CHQ004525 MASH EA", "FT25314D32ZC", "c2"),
+            ("2025-11-10", 0, -30000, "Chq Dep CHQ004680 DREAMLINE", "FT25314B23L2", "d1"),
+            ("2025-11-10", 0, -60000, "Chq Dep CHQ004525 MASH EA", "FT25314D32ZC", "d2"),
+            ("2025-11-11", 30000, 0, "Chq Dep CHQ004680 DREAMLINE", "FT-REBANK-1", "r1"),
+            ("2025-11-11", 60000, 0, "Chq Dep CHQ004525 MASH EA", "FT-REBANK-2", "r2"),
+        ], columns=["Transaction Date", "Money In Num", "Money Out Num",
+                    "Transaction Details", "Ref_Clean", "Bank_Row_ID"])
+        movements = bank_overlap_dry_run(rows, "KCB-1")
+        plan = {"mode": "DRY_RUN_ONLY_NO_DB_WRITES", "bank_movements": movements}
+        candidates = cheque_return_candidates(plan)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual({c["cheque_number"] for c in candidates}, {"4680", "4525"})
+        self.assertTrue(all(c["net_amount_ksh"] == "0.00" for c in candidates))
+        self.assertTrue(all(len(c["later_credit_candidates"]) == 1 for c in candidates))
+
     def test_manifest_does_not_modify_local_files(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "opening_balances_v1.json"
