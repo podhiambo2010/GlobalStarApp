@@ -26,10 +26,13 @@ st.sidebar.markdown("## Data Upload & Portal Setup")
 st.sidebar.markdown("---")
 
 uploaded_tenant_file = st.sidebar.file_uploader("Upload Tenants Details (Excel)", type=["xlsx"])
-uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx"])
+uploaded_bank_file = st.sidebar.file_uploader("Upload Bank Statement (Excel)", type=["xlsx", "xls"], help="Legacy .xls KCB exports are supported when the xlrd dependency is installed. The workbook must contain transaction dates, descriptions, references and money-in/out columns.")
 
 tenant_path = uploaded_tenant_file if uploaded_tenant_file is not None else "Tenants_Details.xlsx"
 bank_path = uploaded_bank_file if uploaded_bank_file is not None else "KCB_Bank_Statement.xlsx"
+
+if uploaded_bank_file is not None and uploaded_bank_file.name.lower().endswith(".xls"):
+    st.sidebar.info("Legacy Excel (.xls) uploaded. Its contents must pass KCB transaction-column verification before reconciliation.")
 
 if not os.path.exists("Tenants_Details.xlsx") and uploaded_tenant_file is None:
     st.warning("⚠️ Please upload your `Tenants_Details.xlsx` file using the sidebar.")
@@ -75,7 +78,7 @@ if module == "Dashboard & Arrears":
     with st.expander("Pinned reporting start — Bank baseline", expanded=False):
         selected_baseline = st.date_input("Pinned starting date", value=pinned_start,
             key="pinned_kcb_start")
-        st.caption("This setting does not import or merge older statements. Changes take effect after saving.")
+        st.caption("A pinned start date is not a historical import. To report from 1 March 2022, upload a bank export that actually covers that date, or reconcile earlier statement periods separately. Existing reviewed bank transactions will not be silently reassigned.")
         if st.button("Save pinned start date", key="save_pinned_kcb_start"):
             save_baseline(baseline_path, selected_baseline)
             st.success("Pinned reporting start saved locally.")
