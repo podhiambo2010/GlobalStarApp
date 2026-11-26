@@ -886,6 +886,116 @@ elif module == "Arrears Payment Reminders":
                                 "No subsequent matching credit found in the uploaded "
                                 "statement. Re-banking is not bank-verified."
                             )
+                with st.expander("Stage 1H — Confirm cheque clearance (local audit only)", expanded=False):
+                    from cheque_clearance_v1h import record_clearance, latest_reviews
+                    register_path = "cheque_clearance_reviews_v1h.json"
+                    st.caption(
+                        "Confirms the later bank credit only. Original deposit and "
+                        "returned debit remain untouched, and NO rent, allocations, "
+                        "tenant balances or database entries are posted."
+                    )
+                    try:
+                        previously_reviewed = latest_reviews(register_path)
+                    except (ValueError, OSError, json.JSONDecodeError) as exc:
+                        previously_reviewed = {}
+                        st.error(f"Clearance register needs repair before further reviews: {exc}")
+                        st.stop()
+                    for pair in returned_cheques:
+                        later_rows = pair.get("later_credit_candidates", [])
+                        with st.container(border=True):
+                            st.markdown(
+                                f"**Cheque {pair['cheque_number']} — KSh {pair['amount_ksh']}**"
+                            )
+                            if len(later_rows) != 1:
+                                st.warning("Requires exactly one later credit candidate; cannot record clearance.")
+                                continue
+                            later_credit = later_rows[0]
+                            current_review = previously_reviewed.get(pair["credit_row_id"])
+                            if current_review:
+                                st.info(
+                                    f"Last review: {current_review['status']} by "
+                                    f"{current_review['reviewer']} on "
+                                    f"{current_review['reviewed_at_utc']}"
+                                )
+                            st.write(
+                                f"Return: {pair['credit_row_id']} + {pair['debit_row_id']} "
+                                f"(zero net); later credit: {later_credit['bank_row_id']} "
+                                f"on {later_credit['date']} ({later_credit['reference']})."
+                            )
+                            key = pair["credit_row_id"].replace(":", "_")
+                            tenant_options = {
+                                str(row["Tenancy_ID"]): (
+                                    f"Unit {row['Shop #']} — {row['Tenant Name']} — {row['Tenancy_ID']}"
+                                )
+                                for _, row in review_register.iterrows()
+                                if str(row["Tenancy_Status"]) != "vacancy"
+                            }
+                            if not tenant_options:
+                                st.error("No eligible tenancies available.")
+                                continue
+                            match = st.selectbox(
+                                "Exact tenancy for this cheque",
+                                list(tenant_options),
+                                format_func=lambda value: tenant_options[value],
+                                index=None,
+                                placeholder="Select verified tenancy",
+                                key=f"v1h_tenant_{key}",
+                            )
+                            decision = st.selectbox(
+                                "Bank clearance decision",
+                                ["needs_investigation", "bank_cleared_pending_allocation", "not_cleared"],
+                                key=f"v1h_decision_{key}",
+                            )
+                            verified_posting = st.checkbox(
+                                "I verified the later bank credit actually posted",
+                                key=f"v1h_posting_{key}",
+                            )
+                            reversal_checked = st.checkbox(
+                                "I checked for subsequent reversals in the available bank evidence",
+                                key=f"v1h_reversal_{key}",
+                            )
+                            reviewer = st.text_input(
+                                "Reviewer", key=f"v1h_reviewer_{key}"
+                            )
+                            note = st.text_area(
+                                "Bank evidence and reason (required)",
+                                key=f"v1h_note_{key}",
+                            )
+                            confirmed = st.checkbox(
+                                "I confirm this decision refers to the exact cheque, bank rows and tenancy",
+                                key=f"v1h_confirm_{key}",
+                            )
+                            can_save = bool(
+                                match and confirmed and reviewer.strip()
+                                and len(note.strip()) >= 15
+                                and (decision != "bank_cleared_pending_allocation"
+                                     or (verified_posting and reversal_checked))
+                            )
+                            if st.button(
+                                "Save cheque clearance review (no rent posting)",
+                                disabled=not can_save,
+                                key=f"v1h_save_{key}",
+                            ):
+                                try:
+                                    record_clearance(
+                                        register_path, pair, later_credit,
+                                        tenancy_id=match,
+                                        tenant_name=tenant_options[match],
+                                        status=decision,
+                                        reviewer=reviewer,
+                                        explanation=note,
+                                        verified_bank_posting=verified_posting,
+                                        checked_no_later_reversal=reversal_checked,
+                                    )
+                                    st.success("Clearance evidence saved locally. No rent or allocation posted.")
+                                    st.rerun()
+                                except (ValueError, OSError, json.JSONDecodeError) as exc:
+                                    st.error(f"Nothing saved: {exc}")
+                    st.warning(
+                        "A bank-cleared decision is NOT a rent allocation. "
+                        "Any future import must independently verify this register, "
+                        "preserve historical bank rows, and prevent double counting."
+                    )
                     st.warning(
                         "Stage 1G remains investigation-only. Do not authorize "
                         "migration, post rent or remove any original bank movements "
