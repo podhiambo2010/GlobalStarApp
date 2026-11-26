@@ -99,7 +99,11 @@ def bank_overlap_dry_run(frame, account_key, previously_seen=()):
         if incoming != 0 and outgoing != 0:
             raise ValueError("A bank row contains both money in and money out")
         direction = "credit" if incoming != 0 else "debit"
-        amount = incoming if incoming != 0 else -outgoing
+        # KCB exports may use either a positive magnitude or a negative
+        # signed number in the Money Out column. Direction comes from the
+        # populated column, not the sign of its raw numeric representation.
+        # Always retain the original bank row and make debit amounts negative.
+        amount = abs(incoming) if incoming != 0 else -abs(outgoing)
         day = _date(r.get("Transaction Date"))
         ref = str(r.get("Ref_Clean", "")).strip()
         if ref.casefold() == "nan":
