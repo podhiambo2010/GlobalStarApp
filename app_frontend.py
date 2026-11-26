@@ -806,8 +806,37 @@ elif module == "Arrears Payment Reminders":
                         "identical bank movements must be resolved first."
                     )
                 from migration_review_v1e import (
-                    ambiguous_bank_rows, collision_summary
+                    ambiguous_bank_rows, collision_summary,
+                    cheque_return_candidates,
                 )
+                returned_cheques = cheque_return_candidates(plan)
+                with st.expander(
+                    f"Stage 1F — Cheque deposit / return candidates "
+                    f"({len(returned_cheques)} pairs)",
+                    expanded=bool(returned_cheques),
+                ):
+                    st.caption(
+                        "A cheque deposit followed by an equal returned-cheque "
+                        "debit has zero net cash effect. Both original bank rows "
+                        "remain intact. A later successful re-banking must be "
+                        "identified separately; do not count the returned cheque "
+                        "as rent or assume any later credit belongs to it."
+                    )
+                    if returned_cheques:
+                        st.dataframe(
+                            pd.DataFrame(returned_cheques),
+                            width="stretch", hide_index=True,
+                        )
+                        st.warning(
+                            "Proposed pairs are NOT automatically verified, "
+                            "allocated or imported. Confirm both bank movements "
+                            "and the later successful credit before approving rent."
+                        )
+                    else:
+                        st.info(
+                            "No exact same-day cheque credit/debit candidates "
+                            "detected in the currently uploaded bank statement."
+                        )
                 collision_rows = ambiguous_bank_rows(plan)
                 with st.expander(
                     f"Stage 1E — Inspect identical-looking bank movements "
