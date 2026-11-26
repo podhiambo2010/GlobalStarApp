@@ -20,10 +20,10 @@ class MigrationDryRunTests(unittest.TestCase):
             "Tenancy_ID": "10:test", "Shop #": 10, "Tenant Name": "Mowlem",
             "Tenancy_Status": "current", "Report_Status": "Current",
         }])
-        self.openings = {"balances": {
+        self.openings = {"schema": 1, "balances": {
             "10:test": {"amount_cents": 0, "as_of": "2025-09-01",
                         "evidence": "owner assumed zero rent balance"}
-        }}
+        }, "history": []}
 
     def test_nonunique_reference_repeated_same_file_is_flagged(self):
         result = bank_overlap_dry_run(pd.concat(
