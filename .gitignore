@@ -56,3 +56,8 @@ opening_balances_v1.json
 GSIL_v1d_migration_manifest_PRIVATE.json
 *.migration_manifest_PRIVATE.json
 .venv/
+
+# Audited cheque evidence, local only
+cheque_clearance_reviews_v1h.json
+cheque_allocations_v1i.json
+ignored_transactions.backup_*.json
