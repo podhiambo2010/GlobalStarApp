@@ -1039,6 +1039,26 @@ elif module == "Arrears Payment Reminders":
                             "I confirm this decision refers to the exact cheque, bank rows and tenancy",
                             key=f"v1h_confirm_{key}",
                         )
+                        historical_conflict = bool(
+                            current_review and
+                            current_review.get("tenancy_id") != match and match
+                        )
+                        correction_authorized = False
+                        correction_reason = ""
+                        if historical_conflict:
+                            st.warning(
+                                "Previous clearance review names a different tenancy. "
+                                "Correct this only if the earlier assignment was wrong. "
+                                "Both reviews will remain in the audit history."
+                            )
+                            correction_authorized = st.checkbox(
+                                "I authorize correcting the earlier tenancy assignment",
+                                key=f"v1h_correct_{key}",
+                            )
+                            correction_reason = st.text_area(
+                                "Reason for correcting the historical tenancy (20+ characters)",
+                                key=f"v1h_correct_reason_{key}",
+                            )
                         can_save = bool(
                             match and confirmed and reviewer.strip()
                             and len(reviewer.strip()) >= 3 and len(note.strip()) >= 15
@@ -1059,6 +1079,13 @@ elif module == "Arrears Payment Reminders":
                                 missing_requirements.append("verify the later bank credit")
                             if not reversal_checked:
                                 missing_requirements.append("check for subsequent reversals")
+                        if historical_conflict:
+                            if not correction_authorized:
+                                missing_requirements.append("authorize historical tenancy correction")
+                            if len(correction_reason.strip()) < 20:
+                                missing_requirements.append("explain historical correction (20+ characters)")
+                            can_save = bool(can_save and correction_authorized
+                                            and len(correction_reason.strip()) >= 20)
                         if missing_requirements:
                             st.caption("To enable Save: " + "; ".join(missing_requirements) + ".")
                         if st.button(
@@ -1076,6 +1103,8 @@ elif module == "Arrears Payment Reminders":
                                     explanation=note,
                                     verified_bank_posting=verified_posting,
                                     checked_no_later_reversal=reversal_checked,
+                                    corrective_review=historical_conflict and correction_authorized,
+                                    correction_reason=correction_reason,
                                 )
                                 st.success("Clearance evidence saved locally. No rent or allocation posted.")
                                 st.rerun()
@@ -1085,11 +1114,6 @@ elif module == "Arrears Payment Reminders":
                     "A bank-cleared decision is NOT a rent allocation. "
                     "Any future import must independently verify this register, "
                     "preserve historical bank rows, and prevent double counting."
-                )
-                st.warning(
-                    "Stage 1G remains investigation-only. Do not authorize "
-                    "migration, post rent or remove any original bank movements "
-                    "on the basis of these candidate matches."
                 )
 
         else:
