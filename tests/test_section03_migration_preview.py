@@ -61,6 +61,14 @@ class Section03PreviewTests(unittest.TestCase):
         self.assertEqual(result["held_reasons"]["cheque_related_source_rows"], 2)
         self.assertEqual(result["approved_rent_postings"], 0)
 
+    def test_streamlit_preview_button_key_is_not_result_state_key(self):
+        from pathlib import Path
+        ui = Path(__file__).resolve().parent.parent / "migration_preview_ui_v1_section03.py"
+        source = ui.read_text(encoding="utf-8")
+        self.assertIn('key="v1_section03_prepare_button"', source)
+        self.assertIn('st.session_state["v1_section03_preview"] = preview', source)
+        self.assertNotIn('key="v1_section03_preview"', source)
+
     def test_bad_comparison_blocked(self):
         with self.assertRaises(ValueError):
             build_migration_preview(self.plan, {**self.comparison, "local_bank_rows": 999}, self.root)
