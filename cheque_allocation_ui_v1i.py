@@ -70,9 +70,16 @@ def render_stage_1i(returned_cheques, review_register,
                 f"returned debit {source['returned_debit_row_id']} cancel to zero."
             )
             if current:
+                prior_parts = current.get("allocations") or [
+                    {"rent_period": current["rent_period"], "amount_ksh": current["amount_ksh"]}
+                ]
+                breakdown = ", ".join(
+                    f"{part['rent_period']}: KSh {part['amount_ksh']}"
+                    for part in prior_parts
+                )
                 st.success(
-                    f"Allocation approved for {current['rent_period']}; "
-                    "ledger posting still pending. Save locked."
+                    f"Allocation approved: {breakdown}. "
+                    "Ledger posting still pending. Save locked."
                 )
                 amend = st.checkbox(
                     "Amend existing allocation decision (audited)",
@@ -97,19 +104,47 @@ def render_stage_1i(returned_cheques, review_register,
                 value=f"{eligible_tenancies[tenancy_id]} — {tenancy_id}",
                 disabled=True, key=f"v1i_tenancy_{cheque}_{credit_id}",
             )
-            default_period = date.fromisoformat(current["rent_period"]) if current else date(2025, 11, 1)
-            entered_date = st.date_input(
-                "Rent month being settled (first day of month)",
-                value=default_period,
-                key=f"v1i_period_{cheque}_{credit_id}",
-            )
+            is_quarterly = cheque == "4525"
+            if is_quarterly:
+                st.info(
+                    "Owner-confirmed quarterly rent: November 2025, December 2025 "
+                    "and January 2026 at KSh 20,000 each. One KSh 60,000 receipt "
+                    "is allocated over three months; the bank receipt is NOT duplicated."
+                )
+                parts = [
+                    {"rent_period": "2025-11-01", "amount_ksh": "20000.00"},
+                    {"rent_period": "2025-12-01", "amount_ksh": "20000.00"},
+                    {"rent_period": "2026-01-01", "amount_ksh": "20000.00"},
+                ]
+                st.dataframe([
+                    {"Rent month": p["rent_period"], "Amount (KSh)": p["amount_ksh"]}
+                    for p in parts
+                ], hide_index=True, width="stretch")
+                entered_date = date(2025, 11, 1)
+            else:
+                prior_parts = current.get("allocations") if current else None
+                default_period = date.fromisoformat(
+                    (prior_parts[0]["rent_period"] if prior_parts else current["rent_period"])
+                    if current else "2025-11-01"
+                )
+                entered_date = st.date_input(
+                    "Rent month being settled (first day of month)",
+                    value=default_period,
+                    key=f"v1i_period_{cheque}_{credit_id}",
+                )
+                parts = [
+                    {"rent_period": entered_date.isoformat(),
+                     "amount_ksh": str(source["amount_ksh"])}
+                ]
             st.number_input(
                 "Full cleared credit to allocate (KSh)",
                 value=float(source["amount_ksh"]), disabled=True,
                 key=f"v1i_amount_{cheque}_{credit_id}",
             )
             checked_period = st.checkbox(
-                "I checked the applicable rent month against lease/invoice evidence",
+                ("I checked all three quarterly rent months against lease/invoice evidence"
+                 if is_quarterly else
+                 "I checked the applicable rent month against lease/invoice evidence"),
                 key=f"v1i_period_confirm_{cheque}_{credit_id}",
             )
             checked_amount = st.checkbox(
@@ -136,7 +171,9 @@ def render_stage_1i(returned_cheques, review_register,
                 and confirmed and len(reviewer.strip()) >= 3
                 and len(explanation.strip()) >= 15
                 and (not amend or len(correction_reason.strip()) >= 20)
-                and (not current or current["rent_period"] != entered_date.isoformat())
+                and (not current or (current.get("allocations") or [
+                    {"rent_period": current["rent_period"], "amount_ksh": current["amount_ksh"]}
+                ]) != parts)
             )
             if st.button(
                 "Save audited allocation decision (NO rent posting)",
@@ -155,6 +192,7 @@ def render_stage_1i(returned_cheques, review_register,
                         verified_amount=checked_amount,
                         confirmed=confirmed, amend=amend,
                         correction_reason=correction_reason,
+                        allocations=parts,
                     )
                     st.rerun()
                 except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
