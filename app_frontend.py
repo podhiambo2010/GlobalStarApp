@@ -1162,6 +1162,9 @@ elif module == "Arrears Payment Reminders":
         from supabase_compare_ui_v1 import render_section_02
         render_section_02(migration_plan_for_clearance)
 
+        from migration_preview_ui_v1_section03 import render_section_03
+        render_section_03(migration_plan_for_clearance)
+
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
                 "Enter an independently supported balance as at an exact date. "
