@@ -105,7 +105,7 @@ def build_migration_preview(plan, comparison, root="."):
         "cheque_related_source_rows": cheque_source_rows,
     }
     notes = [
-        "No row is approved to import; 455 local rows does not mean 455 eligible receipts.",
+        f"No row is approved to import; {len(movements)} local rows does not mean {len(movements)} eligible receipts.",
         "Returned cheque original credits and reversal debits remain bank evidence, not rent income.",
         "Stage 1I approvals are NOT ledger postings and must remain pending.",
         "Bank reference alone cannot prove transaction identity or remove apparent duplicates.",
