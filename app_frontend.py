@@ -8,6 +8,7 @@ GOVERNANCE & ARCHITECTURE CONSTITUTION:
 """
 
 import os
+import json
 from datetime import datetime
 from app_backend import LeaseDocumentAI, TenantPortalBackend
 from etims_service import KRAeTIMSClient
@@ -66,33 +67,94 @@ module = st.sidebar.radio(
 )
 
 if module == "Dashboard & Arrears":
-  st.subheader(
-      f"🏢 Portfolio Dashboard & Tenant Arrears ({backend.statement_month_str})"
-  )
-  df_arr = backend.calculate_tenant_arrears()
-
-  col1, col2, col3, col4 = st.columns(4)
-  col1.metric("Total Active Tenants", len(df_arr))
-  col2.metric("Total Expected Rent", f"KSh {df_arr['Expected_Rent'].sum():,.2f}")
-  col3.metric(
-      "Total Actual Collected", f"KSh {df_arr['Actual_Collected'].sum():,.2f}"
-  )
-  col4.metric(
-      "Total Outstanding Arrears", f"KSh {df_arr['Arrears_Balance'].sum():,.2f}"
-  )
-
-  st.dataframe(
-      df_arr[[
-          "Shop #",
-          "Tenant Name",
-          "Monthly Rate",
-          "Expected_Rent",
-          "Actual_Collected",
-          "Arrears_Balance",
-          "Enforcement_Status",
-      ]],
-      width="stretch",
-  )
+    st.subheader(f"🏢 Portfolio Dashboard — Tenancy History ({backend.statement_month_str})")
+    from statement_period_v1 import load_baseline, save_baseline, coverage_message
+    baseline_path = "bank_reporting_baseline_v1.json"
+    pinned_start = load_baseline(baseline_path)
+    st.caption(f"Detected KCB statement period: {backend.statement_start_date:%d %b %Y} — {backend.statement_end_date:%d %b %Y} (from the workbook header).")
+    with st.expander("Pinned reporting start — Bank baseline", expanded=False):
+        selected_baseline = st.date_input("Pinned starting date", value=pinned_start,
+            key="pinned_kcb_start")
+        st.caption("This setting does not import or merge older statements. Changes take effect after saving.")
+        if st.button("Save pinned start date", key="save_pinned_kcb_start"):
+            save_baseline(baseline_path, selected_baseline)
+            st.success("Pinned reporting start saved locally.")
+            st.rerun()
+    coverage_status, coverage_note = coverage_message(
+        pinned_start, backend.statement_start_date, backend.statement_end_date)
+    st.caption(f"Pinned baseline: {pinned_start:%d %b %Y}")
+    if coverage_status != "covered":
+        st.warning(coverage_note)
+    else:
+        st.info(coverage_note)
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        register, credits = backend.tenancy_turnover_report()
+        st.info(
+            f"Excel-only tenancy history. Reporting period: "
+            f"{backend.statement_start_date:%d %b %Y} to "
+            f"{backend.statement_end_date:%d %b %Y}. "
+            "These are period figures, NOT confirmed lifetime arrears."
+        )
+        current_count = int((register["Report_Status"] == "Current").sum())
+        former_count = int((register["Tenancy_Status"] == "former").sum())
+        from dashboard_bank_groups_v1 import group_bank_credits
+        credit_groups = group_bank_credits(credits)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Current tenant records", current_count)
+        c2.metric("Former tenant records", former_count)
+        c3.metric("Expected period rent", f"KSh {register['Expected_Rent'].sum():,.2f}")
+        c4.metric("Credits needing review", len(credit_groups["Needs manual review"]))
+        st.caption(
+            "Verified collections include only reviewed tenancy-specific assignments. Suggested matches remain provisional. "
+            "Vacancies are not billed. Future tenancies are not billed before their commencement. "
+            "A former occupant's end date stops further accrual, without erasing historical records."
+        )
+        cols = ["Shop #", "Tenancy_ID", "Tenant Name", "Tenancy_Status",
+                "Report_Status", "Lease_Date_Parsed", "End_Actual", "Rent_Rate",
+                "Expected_Rent", "Actual_Collected", "Provisional_Credits",
+                "Deposit_Received", "Advance_Rent_Received", "Split_Current_Rent_Received", "Period_Difference", "Review_Required"]
+        st.dataframe(register[cols], width="stretch", hide_index=True)
+        st.warning(
+            "Opening balances, security deposits, unapplied payments and bank credits "
+            "require reconciliation. Period Difference is not an enforceable arrears balance."
+        )
+        st.markdown("#### Bank receipt reconciliation — by review status")
+        st.caption(
+            "Each row below is one original KCB credit identified by Bank_Row_ID. "
+            "Provisional description matches are not confirmed rent; approved or split "
+            "rows are shown separately and are not new work."
+        )
+        cols_credits = [col for col in [
+            "Bank_Row_ID", "Transaction Date", "Transaction Details",
+            "Money In Num", "Ref_Clean", "Allocation_Status", "Tenancy_ID"
+        ] if col in credits.columns]
+        labels = [
+            ("Needs manual review", True),
+            ("Automatically identified — not approved", False),
+            ("Approved tenancy allocations", False),
+            ("Split deposits / advance rent", False),
+            ("Excluded transactions", False),
+        ]
+        for heading, expanded in labels:
+            items = credit_groups[heading]
+            with st.expander(f"{heading} ({len(items)})", expanded=expanded):
+                if items.empty:
+                    st.info("No bank credits in this category for the uploaded statement.")
+                else:
+                    st.dataframe(items[cols_credits], width="stretch", hide_index=True)
+        st.caption(
+            f"Reconciliation display: {sum(len(items) for items in credit_groups.values())} "
+            f"of {len(credits)} bank credits accounted for across five categories. "
+            "This is classification coverage, not bank-balance reconciliation."
+        )
+        if register["Review_Required"].any():
+            st.error(f"{int(register['Review_Required'].sum())} tenancy record(s) require clarification.")
+    else:
+        st.error(
+            "This workbook lacks Tenancy Record Status and Lease End Date. "
+            "Upload the reviewed tenancy-history workbook; old shop-based figures "
+            "are not reliable when tenants have changed."
+        )
 
 elif module == "Deposit & Lease Ledger":
     st.subheader("📋 Deposit & Lease Ledger")
@@ -100,13 +162,257 @@ elif module == "Deposit & Lease Ledger":
     
     total_leases = len(df_dep)
     total_deposit_liability = pd.to_numeric(df_dep['Deposit (KSh)'], errors='coerce').sum()
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(df_dep.columns):
+        st.warning("Deposit figures are historical workbook amounts, not verified liabilities. Former-tenant refunds and settlements must be reconciled before relying on totals.")
     
     col1, col2 = st.columns(2)
     col1.metric("Total Lease Records", total_leases)
-    col2.metric("Total Deposit Liabilities", f"KSh {total_deposit_liability:,.2f}")
+    col2.metric("Deposits Recorded (Unverified)", f"KSh {total_deposit_liability:,.2f}")
     st.markdown("---")
 
     st.dataframe(df_dep[['Shop / Unit #', 'Tenant Name', 'Lease Date', 'Deposit (KSh)', 'Deposit_Timing', 'Lease_Type']], width='stretch')
+
+elif module == "Unmapped Payment Auditor":
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.subheader("🔍 Bank Credit Review — Individual Tenancies")
+        register, credits = backend.tenancy_turnover_report()
+        st.info("Decisions are recorded per original bank row, not per shared reference. Existing shop-based reviews are retained as legacy history.")
+        st.warning("Do not classify deposits, owner transfers, duplicate/reversed credits or unidentified receipts as rent without documentary support.")
+        st.download_button("Download tenancy review decisions (backup JSON)",
+            data=json.dumps(backend.tenancy_reviews, indent=2),
+            file_name="GlobalStar_V1_Tenancy_Bank_Review_Backup.json",
+            mime="application/json")
+        backup = st.file_uploader("Restore a previously downloaded review backup (optional)",
+            type=["json"], key="turnover_review_backup")
+        if backup is not None:
+            try:
+                restored = json.loads(backup.getvalue().decode("utf-8"))
+                if not isinstance(restored, dict):
+                    raise ValueError("Backup must contain a JSON object")
+                bank_ids = set(backend.df_bank_unfiltered["Bank_Row_ID"])
+                if not set(restored).issubset(bank_ids):
+                    raise ValueError("Backup contains bank rows not present in this uploaded statement")
+                if not all(isinstance(v, dict) and
+                           v.get("decision") in {"assign", "exclude", "pending"}
+                           for v in restored.values()):
+                    raise ValueError("Backup contains an invalid review decision")
+                st.warning("Restoring replaces current decisions; download your current backup first.")
+                if st.button("Confirm restore of reviewed bank rows"):
+                    from bank_review_v1 import write_review
+                    write_review(backend.tenancy_review_path, restored)
+                    backend.tenancy_reviews = restored
+                    st.success("Review backup restored")
+                    st.rerun()
+            except (ValueError, UnicodeError) as exc:
+                st.error(f"Backup could not be restored: {exc}")
+        from bank_review_v1 import load_event_history
+        with st.expander("Restore Excluded Transaction", expanded=False):
+            excluded = credits[credits["Allocation_Status"].isin([
+                "Excluded (legacy)", "Excluded (reviewed)",
+                "Legacy decision: reverify",
+            ])].copy()
+            excluded = excluded[
+                (excluded["Allocation_Status"] != "Legacy decision: reverify")
+                | excluded["Legacy_Decision"].astype(str).str.contains(
+                    "exclusion", case=False, na=False)
+            ]
+            if excluded.empty:
+                st.info("No currently excluded bank credits to restore for this period.")
+            else:
+                st.dataframe(excluded[[col for col in [
+                    "Transaction Date", "Transaction Details", "Money In Num",
+                    "Ref_Clean", "Bank_Row_ID", "Allocation_Status"
+                ] if col in excluded.columns]], hide_index=True, width="stretch")
+                restore_options = excluded["Bank_Row_ID"].astype(str).tolist()
+                restore_id = st.selectbox("Select excluded bank transaction",
+                    restore_options, key="restore_excluded_row")
+                restore_row = excluded[excluded["Bank_Row_ID"] == restore_id].iloc[0]
+                st.caption(f"Selected amount KSh {float(restore_row['Money In Num']):,.2f}; reference {restore_row['Ref_Clean']}")
+                restore_reason = st.text_input("Reason for restoring this exclusion",
+                    key="restore_exclusion_reason",
+                    placeholder="e.g. Raphael or Everlyne rent incorrectly excluded")
+                acknowledge = st.checkbox(
+                    "I verified the original bank row and intend to reverse this exclusion",
+                    key="restore_exclusion_ack")
+                if st.button("Restore Excluded Transaction", type="primary",
+                             disabled=not acknowledge or not restore_reason.strip(),
+                             key="restore_exclusion_confirm"):
+                    try:
+                        backend.save_tenancy_bank_review(
+                            restore_id, "restore", reason=restore_reason)
+                    except (ValueError, OSError) as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Exclusion reversed for this row. Original matching rules will run again.")
+                        st.rerun()
+        with st.expander("Bank Review History — Assignments, Pending, Exclusions & Restorations", expanded=False):
+            history = load_event_history(backend.tenancy_event_history_path)
+            if history:
+                st.dataframe(pd.DataFrame(history).iloc[::-1], hide_index=True, width="stretch")
+                st.download_button("Download bank review history (JSON)",
+                    data=json.dumps(history, indent=2),
+                    file_name="GlobalStar_Bank_Review_History.json", mime="application/json")
+            else:
+                st.info("No new audit events recorded yet. Earlier legacy exclusions remain in ignored_transactions.json.")
+        with st.expander("Split / Allocate Receipt — Deposit and Advance Rent", expanded=False):
+            st.info("Use this for refundable deposits or prepaid rent, including payments made before a lease begins. It does not automatically recognise advance rent as earned income.")
+            st.warning("The component total must equal a single original bank credit. If KSh 100,000, 60,000 and 40,000 are separate bank credits, split or classify each bank row individually.")
+            eligible_split_statuses = {"Review required", "Pending (reviewed)",
+                "Stale tenancy assignment: reverify"}
+            mode = st.radio("Show bank receipts",
+                ["Unmatched / Requires Review", "Provisional matches — needs reclassification"],
+                horizontal=True, key="split_receipt_filter")
+            split_options = credits.loc[
+                ~credits["Bank_Row_ID"].isin(backend.receipt_splits)].copy()
+            if mode == "Unmatched / Requires Review":
+                split_options = split_options.loc[
+                    split_options["Allocation_Status"].isin(eligible_split_statuses)]
+            else:
+                split_options = split_options.loc[
+                    split_options["Allocation_Status"].isin({
+                        "Identified (verify before notice)",
+                        "Identified (legacy override, verify tenancy)"})]
+            st.caption(f"{len(split_options)} eligible bank receipts; approved and excluded entries remain protected.")
+            if split_options.empty:
+                st.info("No eligible incoming credits available for splitting.")
+            else:
+                split_id = st.selectbox("Select exact original bank credit",
+                    split_options["Bank_Row_ID"].astype(str).tolist(),
+                    format_func=lambda rid: (
+                        f"{split_options.loc[split_options['Bank_Row_ID'] == rid, 'Transaction Date'].iloc[0]} | "
+                        f"KSh {float(split_options.loc[split_options['Bank_Row_ID'] == rid, 'Money In Num'].iloc[0]):,.2f} | "
+                        f"{str(split_options.loc[split_options['Bank_Row_ID'] == rid, 'Transaction Details'].iloc[0])[:65]} | {rid}"),
+                    key="split_bank_row")
+                bank_receipt = split_options.loc[split_options["Bank_Row_ID"] == split_id].iloc[0]
+                st.caption(f"Original bank amount: KSh {float(bank_receipt['Money In Num']):,.2f}; bank reference: {bank_receipt['Ref_Clean']}")
+                valid_tenants = register[(~register["Review_Required"]) &
+                    (register["Tenancy_Status"] != "vacancy")].copy()
+                if valid_tenants.empty:
+                    st.error("No valid tenant records available.")
+                else:
+                    split_tenancy = st.selectbox("Allocate to individual tenancy",
+                        valid_tenants["Tenancy_ID"].astype(str).tolist(),
+                        format_func=lambda tid: (
+                            f"Shop {valid_tenants.loc[valid_tenants['Tenancy_ID'] == tid, 'Shop #'].iloc[0]} — "
+                            f"{valid_tenants.loc[valid_tenants['Tenancy_ID'] == tid, 'Tenant Name'].iloc[0]} ({tid})"),
+                        key="split_tenancy")
+                    selected_tenant = valid_tenants.loc[valid_tenants["Tenancy_ID"] == split_tenancy].iloc[0]
+                    nparts = st.number_input("Number of allocation components", min_value=1, max_value=8, value=1, step=1, key="split_parts")
+                    parts = []
+                    for i in range(int(nparts)):
+                        st.markdown(f"**Component {i+1}**")
+                        left, right = st.columns(2)
+                        kind = left.selectbox("Classification", ["Security deposit", "Advance rent", "Current rent"],
+                            key=f"split_kind_{i}")
+                        amount = right.number_input("Amount (KSh)", min_value=0.0, value=0.0, step=100.0,
+                            key=f"split_amount_{i}")
+                        item = {"kind": {"Security deposit": "security_deposit",
+                            "Advance rent": "advance_rent", "Current rent": "current_rent"}[kind],
+                            "amount": amount}
+                        if kind != "Security deposit":
+                            lease_start = selected_tenant["Lease_Date_Parsed"].date()
+                            ds, de = st.columns(2)
+                            item["period_start"] = ds.date_input("Rental period from", value=lease_start,
+                                key=f"split_start_{i}")
+                            item["period_end"] = de.date_input("Rental period through", value=lease_start,
+                                key=f"split_end_{i}")
+                        parts.append(item)
+                    total = sum(float(x["amount"]) for x in parts)
+                    balance = float(bank_receipt["Money In Num"]) - total
+                    st.caption(f"Components KSh {total:,.2f} | Unallocated difference KSh {balance:,.2f}")
+                    supporting = st.text_input("Supporting receipt / evidence and reason",
+                        key="split_evidence", placeholder="Receipt ID and pre-tenancy deposit/advance details")
+                    approved = st.checkbox("I verified the receipt, individual tenancy and applicable rental periods",
+                        key="split_confirm")
+                    if st.button("Save verified receipt split", type="primary",
+                        disabled=not approved or not supporting.strip() or abs(balance) > 0.005,
+                        key="save_split"):
+                        try:
+                            backend.save_receipt_split(split_id, split_tenancy, parts, supporting)
+                        except (ValueError, OSError) as exc:
+                            st.error(str(exc))
+                        else:
+                            st.success("Bank receipt split recorded. Deposit and advance rent kept separate from recognised rent.")
+                            st.rerun()
+            if backend.receipt_splits:
+                st.markdown("**Saved splits (read only)**")
+                st.dataframe(pd.DataFrame([
+                    {"Bank_Row_ID": rid, "Tenancy_ID": val["tenancy_id"],
+                     "Original_Credit_KSh": val["original_amount_cents"]/100,
+                     "Security_Deposit_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "security_deposit")/100,
+                     "Advance_Rent_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "advance_rent")/100,
+                     "Current_Rent_KSh": sum(x["amount_cents"] for x in val["components"] if x["kind"] == "current_rent")/100}
+                    for rid, val in backend.receipt_splits.items()]), hide_index=True, width="stretch")
+                st.download_button("Download saved receipt splits (backup JSON)",
+                    data=json.dumps(backend.receipt_splits, indent=2),
+                    file_name="GlobalStar_Receipt_Splits_Backup.json", mime="application/json")
+        counts = credits["Allocation_Status"].value_counts()
+        st.caption(" | ".join(f"{k}: {v}" for k, v in counts.items()))
+        st.caption("Existing automatic description matches are suggestions, not manually verified rent receipts.")
+        include_matched = st.checkbox("Show already identified, approved and excluded bank credits",
+            value=False, key="turnover_show_all_bank_credits")
+        finished_statuses = {
+            "Identified (verify before notice)",
+            "Identified (legacy override, verify tenancy)",
+            "Assigned (reviewed)",
+            "Excluded (reviewed)",
+            "Excluded (legacy)",
+            "Split (reviewed)",
+        }
+        reviewable = credits.copy() if include_matched else credits[
+            ~credits["Allocation_Status"].isin(finished_statuses)].copy()
+        st.caption(f"Showing {len(reviewable)} transactions requiring intervention"
+            if not include_matched else f"Showing all {len(reviewable)} credit transactions")
+        display_cols = [x for x in ["Bank_Row_ID", "Transaction Date", "Transaction Details",
+            "Money In Num", "Ref_Clean", "Allocation_Status", "Legacy_Decision",
+            "Tenancy_ID"] if x in reviewable.columns]
+        st.dataframe(reviewable[display_cols], width="stretch", hide_index=True)
+        if not reviewable.empty:
+            options = reviewable["Bank_Row_ID"].tolist()
+            selected_id = st.selectbox("Select exact bank row", options,
+                format_func=lambda rid: (
+                    f"{str(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Transaction Date'].iloc[0])} | "
+                    f"KSh {float(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Money In Num'].iloc[0]):,.2f} | "
+                    f"{rid} | "
+                    f"{str(reviewable.loc[reviewable['Bank_Row_ID'] == rid, 'Transaction Details'].iloc[0])[:75]}"
+                ), key="turnover_row_selector")
+            picked = reviewable[reviewable["Bank_Row_ID"] == selected_id].iloc[0]
+            st.caption(f"Selected reference: {picked.get('Ref_Clean', '')} — Row ID: {selected_id}")
+            st.caption(f"Current classification: {picked['Allocation_Status']}")
+            decision_label = st.radio("Review decision",
+                ["Pending further evidence", "Assign to a specific tenancy", "Exclude from rental allocations"],
+                key="turnover_action")
+            eligible = register[(~register["Review_Required"]) &
+                (register["Tenancy_Status"] != "vacancy")].copy()
+            chosen_tenancy = None
+            if decision_label == "Assign to a specific tenancy":
+                tenancy_options = eligible["Tenancy_ID"].astype(str).tolist()
+                chosen_tenancy = st.selectbox("Select individual tenancy", tenancy_options,
+                    format_func=lambda tid: (
+                        f"{eligible.loc[eligible['Tenancy_ID'] == tid, 'Shop #'].iloc[0]} — "
+                        f"{eligible.loc[eligible['Tenancy_ID'] == tid, 'Tenant Name'].iloc[0]} "
+                        f"({tid})"
+                    ))
+                st.warning("Confirm this payment belongs to the selected tenancy and is rental income before saving.")
+            reason = st.text_input("Evidence / reason for decision",
+                placeholder="e.g., verified rent receipt, deposit, bank reversal, unconfirmed payer")
+            confirm = st.checkbox("I checked the transaction description and supporting records",
+                key="turnover_confirm")
+            if st.button("Save bank-row review", type="primary", disabled=not confirm or not reason.strip()):
+                decision = {"Pending further evidence": "pending",
+                    "Assign to a specific tenancy": "assign",
+                    "Exclude from rental allocations": "exclude"}[decision_label]
+                try:
+                    changed = backend.save_tenancy_bank_review(selected_id, decision, chosen_tenancy, reason)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    if changed:
+                        st.success("Decision recorded against this bank row only.")
+                        st.rerun()
+                    else:
+                        st.info("The decision is unchanged. No duplicate history event was recorded.")
+        st.stop()
 
 elif module == "Unmapped Payment Auditor":
   st.subheader("🔍 Unmapped Payment Auditor")
@@ -163,12 +469,41 @@ elif module == "Unmapped Payment Auditor":
 elif module == "Lease PDF AI Extractor & Alerts":
     st.subheader("🤖 AI Lease Agreement Extractor & Active Leases Overview")
     st.markdown("Lease overview from the uploaded tenant workbook (no database connection).")
-    lease_columns = [
-        c for c in ["Shop #", "Tenant Name", "Monthly Rate", "Lease_Date_Parsed",
-                    "Calculated_Lease_End", "Calculated_Status"]
-        if c in backend.df_tenants.columns
-    ]
-    st.dataframe(backend.df_tenants[lease_columns], width="stretch")
+    from lease_overview_v1 import build_lease_overview
+    lease_overview = build_lease_overview(backend.df_tenants)
+    if not {"Tenancy Record Status", "Lease End Date"}.issubset(backend.df_tenants.columns):
+        st.error("Upload the reviewed tenancy-history workbook. Lease expiry alone cannot establish actual occupancy.")
+    else:
+        st.info("Occupancy follows the recorded tenancy status and actual departure date. An expired original term does not automatically make a current tenant former or vacant.")
+        statuses = lease_overview["Occupancy_Status"].value_counts()
+        col_current, col_former, col_vacant, col_review = st.columns(4)
+        col_current.metric("Current occupancy", int(statuses.get("Current", 0)))
+        col_former.metric("Former tenants", int(statuses.get("Former", 0)))
+        col_vacant.metric("Vacancies", int(statuses.get("Vacant", 0)))
+        col_review.metric("Occupancy records needing review",
+            int(lease_overview["Occupancy_Status"].str.contains("Needs review|Unverified").sum()))
+    lease_columns = [c for c in [
+        "Shop #", "Tenant Name", "Monthly Rate", "Tenancy Record Status",
+        "Lease_Date_Parsed", "Lease End Date", "Occupancy_Status",
+        "Original_Term_End_Estimate", "Renewal_Recorded", "Contract_Review_Status",
+        "Lease_Review_Note"
+    ] if c in lease_overview.columns]
+    st.dataframe(lease_overview[lease_columns], width="stretch", hide_index=True)
+    st.caption("Original-term expiry is an advisory document-review flag, not evidence that a tenancy has ended. Renewal documents and termination records require verification.")
+    from lease_overview_v1 import expired_current_leases
+    expired_lease_rows = expired_current_leases(lease_overview)
+    with st.expander(f"Expired original lease terms — current occupants ({len(expired_lease_rows)})", expanded=False):
+        st.caption("Only CURRENT occupants whose original documented duration has passed are listed. Renewal flags do not prove a new lease end date. Former tenants and vacancies are not included.")
+        if expired_lease_rows.empty:
+            st.success("No current occupancies with an expired original lease term found.")
+        else:
+            columns = [c for c in [
+                "Shop #", "Tenant Name", "Occupancy_Status", "Lease_Date_Parsed",
+                "Original_Term_End_Estimate", "Days_Past_Original_Term",
+                "Renewal_Recorded", "Contract_Review_Status", "Lease_Review_Note"
+            ] if c in expired_lease_rows.columns]
+            st.dataframe(expired_lease_rows[columns], width="stretch", hide_index=True)
+            st.caption("Informational follow-up only. No automatic notices or tenant changes are made.")
 
     st.markdown("---")
     st.markdown("### 📂 Optional: Upload New Lease Agreement (Instant OCR & Master Verification)")
@@ -182,7 +517,7 @@ elif module == "Lease PDF AI Extractor & Alerts":
                 verification_summaries = []
                 for fl in folder_leases:
                     v_res = backend.verify_ocr_against_master(fl)
-                    fl["Master Verification"] = "Pass" if not v_res["Discrepancies"] else "Discrepancy Found"
+                    fl["Master Verification"] = "Review required" if v_res["Discrepancies"] else "Provisional match — verify signed source"
                     fl["Discrepancy Details"] = ", ".join(v_res["Discrepancies"]) if v_res["Discrepancies"] else "None"
                     verification_summaries.append(fl)
                 
@@ -202,8 +537,18 @@ elif module == "Lease PDF AI Extractor & Alerts":
         for idx, pdf_file in enumerate(uploaded_pdfs):
             st.markdown(f"### 📄 Extracting: `{getattr(pdf_file, 'name', f'Lease_{idx + 1}')}`")
             extracted_info = LeaseDocumentAI.parse_lease_pdf(pdf_file)
+            ocr_text = extracted_info.pop("OCR Raw Text", "")
             st.json(extracted_info)
-            
+            with st.expander("Inspect OCR text for this PDF (read-only)", expanded=False):
+                st.caption("Text is shown for diagnosis; do not treat OCR wording as verified contract data.")
+                if ocr_text.strip():
+                    st.text_area("Recovered text", value=ocr_text, height=320, disabled=True,
+                                 key=f"ocr_text_{pdf_file.name}")
+                else:
+                    st.warning("No OCR text was recovered.")
+            st.info(f"Extraction attempted: {extracted_info.get('Extraction Method', 'Unknown')}. Scanned pages may require local Tesseract OCR or manual verification. No fields are automatically posted to the tenant ledger.")
+            for issue in extracted_info.get("Extraction Warnings", []):
+                st.warning(issue)
             verification = backend.verify_ocr_against_master(extracted_info)
             if verification["Match Found"]:
                 st.info(f"📋 Master Ledger Match Found! Registered Tenant: **{verification.get('Master Tenant Name')}** | Manual Status: **{verification.get('Manual Status')}**")
@@ -211,9 +556,9 @@ elif module == "Lease PDF AI Extractor & Alerts":
                     for disc in verification["Discrepancies"]:
                         st.warning(f"⚠️ {disc}")
                 else:
-                    st.success("✅ OCR terms match master spreadsheet records perfectly.")
+                    st.info("Extracted values provisionally agree with the master workbook. Verify against the signed lease before updating records.")
             else:
-                st.warning("⚠️ Unit not found in master spreadsheet ledger. Review before registering.")
+                st.warning("⚠️ No verified tenant-and-unit match could be established from this document. Review OCR warnings and signed agreement before registering.")
 
         st.info("PDF extraction is review-only. Update the tenant workbook after verifying the extracted lease; no database records are changed.")
 
@@ -226,6 +571,15 @@ elif module == "Lease PDF AI Extractor & Alerts":
         st.rerun()
 
 elif module == "Arrears Payment Reminders":
+    # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.warning(
+            "This action is disabled in V1 tenancy-history mode. Current period "
+            "calculations are provisional until tenancy-level bank allocations, "
+            "opening balances, and contractual terms have been verified."
+        )
+        st.stop()
+
     st.subheader("📢 Arrears Payment Reminders & Friendly Notices")
     st.markdown(
         "Send polite payment reminders and overdue notices to non-compliant "
@@ -621,6 +975,15 @@ Tel: +254 723 562 286
                     st.success(f"Successfully dispatched bulk SMS reminders to {sms_success_count} out of {total_nc} tenants!")
 
 elif module == "eTIMS Tax Invoices & Bank Statements":
+    # Tenancy-aware V1 mode does not issue notices/invoices from provisional balances.
+    if {'Tenancy Record Status', 'Lease End Date'}.issubset(backend.df_tenants.columns):
+        st.warning(
+            "This action is disabled in V1 tenancy-history mode. Current period "
+            "calculations are provisional until tenancy-level bank allocations, "
+            "opening balances, and contractual terms have been verified."
+        )
+        st.stop()
+
     st.subheader("🧾 eTIMS Tax Invoices & Automated Monthly Billing")
     st.markdown(
         "Generate official KRA eTIMS tax invoices exclusively for compliant tenants who have fully settled their rent."

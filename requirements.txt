@@ -6,3 +6,6 @@ qrcode
 pypdf
 requests
 python-dotenv
+PyMuPDF
+Pillow
+pytesseract

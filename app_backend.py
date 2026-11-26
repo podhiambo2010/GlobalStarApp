@@ -36,56 +36,117 @@ except ImportError:
 class LeaseDocumentAI:
     @staticmethod
     def parse_lease_pdf(pdf_file):
+        """Conservative text extraction for PDF leases; scanned pages require OCR review.
+
+        No hardcoded tenant, rent, shop number or commencement values are returned.
+        Any missing or ambiguous field remains unverified, never guessed.
         """
-        Parses digital or scanned/handwritten PDF lease agreements to extract tenant name, 
-        shop number, rent amount, security deposit, and lease dates with robust template fallbacks.
-        """
-        raw_text = ""
         filename = getattr(pdf_file, "name", "Lease_Document.pdf")
-        
+        warnings = []
+        method = "PDF text layer"
+        pages = []
+        pdf_data = None
         try:
-            reader = pypdf.PdfReader(BytesIO(pdf_file.read()) if hasattr(pdf_file, "read") else pdf_file)
-            for page in reader.pages:
-                txt = page.extract_text()
-                if txt:
-                    raw_text += txt + "\n"
-        except Exception as e:
-            raw_text = str(e)
+            if hasattr(pdf_file, "seek"):
+                pdf_file.seek(0)
+            pdf_data = pdf_file.read() if hasattr(pdf_file, "read") else (
+                pdf_file if isinstance(pdf_file, bytes) else None)
+            reader = pypdf.PdfReader(BytesIO(pdf_data) if pdf_data is not None else pdf_file)
+            pages = [page.extract_text() or "" for page in reader.pages]
+        except Exception as exc:
+            warnings.append(f"Unable to read PDF text layer: {type(exc).__name__}")
+        raw_text = "\n".join(pages)
+        if len(" ".join(raw_text.split())) < 50 or (
+            pages and any(len(page.strip()) < 20 for page in pages)
+        ):
+            # The OCR path is local and optional: PyMuPDF renders page images,
+            # and pytesseract calls the user's installed Tesseract executable.
+            # Never report successful OCR if the binary is unavailable.
+            try:
+                import fitz
+                import pytesseract
+                from PIL import Image
+                if pdf_data is None:
+                    raise ValueError("PDF bytes unavailable for OCR")
+                with fitz.open(stream=pdf_data, filetype="pdf") as document:
+                    if len(document) > 25:
+                        warnings.append("Only the first 25 pages were examined with OCR; verify the remainder.")
+                    ocr_pages = []
+                    for idx, page in enumerate(document):
+                        if idx >= 25:
+                            break
+                        text_page = pages[idx] if idx < len(pages) else ""
+                        if len(text_page.strip()) >= 50:
+                            ocr_pages.append(text_page)
+                            continue
+                        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+                        ocr_pages.append(pytesseract.image_to_string(image, lang="eng"))
+                    raw_text = "\n".join(ocr_pages)
+                    method = "PDF text layer + local Tesseract OCR"
+            except (ImportError, FileNotFoundError) as exc:
+                warnings.append(f"Image OCR not available ({type(exc).__name__}). Install PyMuPDF, Pillow, pytesseract and the Tesseract executable.")
+            except Exception as exc:
+                warnings.append(f"Image OCR unsuccessful ({type(exc).__name__}); verify original scan manually.")
+        cleaned = " ".join(raw_text.split())
+        if len(cleaned) < 50:
+            warnings.append("No reliable machine-readable lease text was recovered; manual transcription required.")
+        if pages and any(len(page.strip()) < 20 for page in pages) and method == "PDF text layer":
+            warnings.append("One or more pages contain little or no extractable text; verify completeness manually.")
 
-        text_clean = " ".join(raw_text.split())
+        def unique_match(pattern, label, transform=lambda x: x):
+            found = [transform(x) for x in re.findall(pattern, cleaned, re.IGNORECASE)]
+            found = list(dict.fromkeys(found))
+            if len(found) == 1:
+                return found[0]
+            if len(found) > 1:
+                warnings.append(f"Conflicting {label} values; manual verification required.")
+            return None
 
-        # 1. Extract Tenant Name
-        tenant_name = "Unknown Tenant"
-        name_match = re.search(r"(?:tenant|lessee)\s*[:\-]?\s*([A-Z\s]+(?:OTIENO|LIMITED|LTD|COMPANY|PROPERTIES|[A-Z]+))", text_clean, re.IGNORECASE)
-        if name_match:
-            tenant_name = name_match.group(1).strip()
-        elif filename:
-            base_name = os.path.basename(filename).replace(".pdf", "").replace("_", " ")
-            tenant_name = base_name.title()
+        # Avoid extracting figures from unrelated clauses by requiring explicit labels.
+        shop = unique_match(r"(?:shop|unit)\s*(?:no\.?|number|#)\s*[:#\-]?\s*(\d{1,4})\b",
+                            "shop number", lambda x: int(x))
+        rent = unique_match(r"(?:monthly\s+rent|rent\s+per\s+month)\s*(?:\(ksh\))?\s*[:=\-]?\s*(?:ksh|kes)?\s*([\d,]+(?:\.\d{1,2})?)",
+                            "monthly rent", lambda x: float(x.replace(",", "")))
+        deposit = unique_match(r"(?:security\s+deposit|refundable\s+deposit)\s*(?:\(ksh\))?\s*[:=\-]?\s*(?:ksh|kes)?\s*([\d,]+(?:\.\d{1,2})?)",
+                               "security deposit", lambda x: float(x.replace(",", "")))
+        commencement = unique_match(
+            r"(?:commencement\s+date|lease\s+start\s+date)\s*[:=\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{4})",
+            "commencement date")
+        # Require a labeled, single-line name; do not consume unrelated contract clauses.
+        name_candidates = re.findall(
+            r"(?im)^\s*(?:tenant|lessee)\s*(?:name)?\s*[:\-]\s*([A-Za-z][A-Za-z &.'\-]{2,65})\s*$",
+            raw_text)
+        name_candidates = list(dict.fromkeys(x.strip() for x in name_candidates))
+        name = name_candidates[0] if len(name_candidates) == 1 else None
+        if len(name_candidates) > 1:
+            warnings.append("Conflicting tenant names; manual verification required.")
+        # The body is whitespace-normalised; name extraction can be ambiguous.
+        if name and len(name.split()) > 8:
+            name = None
+            warnings.append("Tenant name could not be isolated confidently.")
 
-        # 2. Smart Scanned / Handwritten Fallback for known templates (e.g. Aloice Ngolo Otieno scan)
-        if "Aloice" in tenant_name or len(text_clean) < 50:
-            shop_no = 3
-            monthly_rent = 10000.0
-            deposit = 20000.0
-            commencement = "2025-09-01"
-        else:
-            shop_no = 0
-            monthly_rent = 0.0
-            deposit = 0.0
-            commencement = "2026-01-01"
-
+        if len(cleaned) >= 50 and all(item is None for item in (name, shop, rent, deposit, commencement)):
+            warnings.append(
+                "OCR recovered text, but no structured lease fields matched. "
+                "Inspect the extracted wording before changing the parser."
+            )
         return {
-            "Tenant Name": tenant_name,
-            "Shop #": shop_no,
-            "Monthly Rent (KSh)": monthly_rent,
+            "OCR Raw Text": raw_text,
+            "Tenant Name": name,
+            "Shop #": shop,
+            "Monthly Rent (KSh)": rent,
             "Security Deposit (KSh)": deposit,
             "Commencement": commencement,
-            "Email": "tenant@gmail.com",
-            "KRA PIN": "N/A",
-            "Telephone No.": "+254700000000",
-            "Billing Cycle": "Monthly",
-            "Raw Text Length": len(raw_text)
+            "Email": None,
+            "KRA PIN": None,
+            "Telephone No.": None,
+            "Billing Cycle": None,
+            "Raw Text Length": len(raw_text),
+            "Source File": filename,
+            "Extraction Method": method,
+            "Extraction Warnings": warnings,
+            "Verification Required": True,
         }
 
 class TenantPortalBackend:
@@ -191,6 +252,13 @@ class TenantPortalBackend:
         self.statement_month_str = "July 2026"
         self.overrides = self.load_json(self.override_json_path)
         self.ignored_refs = self.load_json(self.ignored_json_path)
+        self.tenancy_review_path = "tenancy_bank_reviews_v1.json"
+        self.tenancy_event_history_path = "tenancy_bank_review_history_v1.json"
+        from bank_review_v1 import load_review
+        self.tenancy_reviews = load_review(self.tenancy_review_path)
+        from receipt_split_v1 import load_splits
+        self.receipt_split_path = "tenancy_receipt_splits_v1.json"
+        self.receipt_splits = load_splits(self.receipt_split_path)
         
         # Published V1 is Excel-only: never initialize or sync a database.
         self.supabase = None
@@ -198,13 +266,19 @@ class TenantPortalBackend:
         self.reload_master_data()
 
     def load_json(self, path: str) -> dict:
-        if os.path.exists(path):
-            try:
-                with open(path, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            raise ValueError(
+                f"Review file '{path}' cannot be read. Restore a valid JSON backup "
+                "rather than losing previous allocation decisions."
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"Review file '{path}' must contain a JSON object.")
+        return data
 
     def save_override(self, txn_ref: str, shop_no: int):
         self.overrides[str(txn_ref).strip()] = int(shop_no)
@@ -378,6 +452,18 @@ class TenantPortalBackend:
                 h_idx = idx
                 break
 
+        if h_idx == 13 and not any(
+            "Transaction Date" in [str(v).strip() for v in df_raw.iloc[idx].values]
+            or "Bank Reference Number" in [str(v).strip() for v in df_raw.iloc[idx].values]
+            for idx in range(len(df_raw))
+        ):
+            xls.close()
+            raise ValueError(
+                "The uploaded Bank Statement workbook does not contain a KCB "
+                "transaction header. It may be a tenants workbook. Please upload "
+                "KCB_Bank_Statement.xlsx under 'Upload Bank Statement (Excel)'."
+            )
+
         columns = [str(c).strip() for c in df_raw.iloc[h_idx].values]
         self.df_bank = pd.read_excel(xls, sheet_name=sheet_name, skiprows=h_idx+1)
         self.df_bank.columns = [str(c).strip() for c in columns]
@@ -389,6 +475,22 @@ class TenantPortalBackend:
         txn_desc_col = col_map.get('transaction details', next((c for c in self.df_bank.columns if 'transaction' in c.lower() or 'description' in c.lower()), 'Transaction Details'))
         ref_col = col_map.get('bank reference number', col_map.get('ref', next((c for c in self.df_bank.columns if 'ref' in c.lower()), 'Bank Reference Number')))
         
+        required_bank_fields = {
+            "Money In": money_in_col, "Money Out": money_out_col,
+            "Transaction Details": txn_desc_col, "Bank Reference Number": ref_col,
+        }
+        missing_bank_fields = [
+            label for label, column in required_bank_fields.items()
+            if column not in self.df_bank.columns
+        ]
+        if missing_bank_fields:
+            raise ValueError(
+                "The Bank Statement upload is missing required KCB columns: "
+                + ", ".join(missing_bank_fields)
+                + ". Confirm the KCB statement is uploaded in the bank field, "
+                  "not the tenant-history workbook."
+            )
+
         self.df_bank['Money In Num'] = pd.to_numeric(
             self.df_bank[money_in_col].astype(str).str.replace(',', '').str.strip(), errors='coerce'
         ).fillna(0)
@@ -397,6 +499,10 @@ class TenantPortalBackend:
         ).fillna(0)
         self.df_bank['Transaction Details'] = self.df_bank[txn_desc_col].astype(str)
         self.df_bank['Ref_Clean'] = self.df_bank[ref_col].astype(str).str.strip()
+        from bank_review_v1 import bank_row_ids
+        self.df_bank["Bank_Row_ID"] = bank_row_ids(self.df_bank)
+        # Preserve original movements and historically excluded rows for audit.
+        self.df_bank_unfiltered = self.df_bank.copy()
 
         def should_ignore(row):
             ref = row['Ref_Clean']
@@ -433,34 +539,43 @@ class TenantPortalBackend:
         self.df_bank['Valid_Credit'] = self.df_bank.apply(is_valid_credit, axis=1)
 
     def verify_ocr_against_master(self, extracted_lease: dict) -> dict:
-        """
-        Compares OCR-extracted lease details against master spreadsheet values 
-        to verify accuracy before final database synchronization.
-        """
-        shop_no = extracted_lease.get("Shop #", 0)
-        match_row = self.df_tenants[self.df_tenants['Shop #'] == shop_no]
-        
-        verification_results = {
-            "Match Found": not match_row.empty,
-            "Discrepancies": []
-        }
-        
-        if not match_row.empty:
-            master_name = str(match_row.iloc[0]['Tenant Name'])
-            master_rate = float(match_row.iloc[0].get('Monthly Rate', 0))
-            extracted_rate = float(extracted_lease.get("Monthly Rent (KSh)", 0))
-            
-            if extracted_rate > 0 and abs(extracted_rate - master_rate) > 1.0:
-                verification_results["Discrepancies"].append(
-                    f"Rent Mismatch: OCR extracted KSh {extracted_rate:,.2f}, Master ledger has KSh {master_rate:,.2f}"
-                )
-            
-            verification_results["Master Tenant Name"] = master_name
-            verification_results["Manual Status"] = match_row.iloc[0].get('Manual_Lease_Status', 'Active')
+        """Compare only confidently extracted values; do not infer an identity from unit alone."""
+        shop_no = extracted_lease.get("Shop #")
+        name = extracted_lease.get("Tenant Name")
+        results = {"Match Found": False, "Discrepancies": [],
+                   "Manual Status": "Unverified", "Master Tenant Name": None}
+        warnings = extracted_lease.get("Extraction Warnings") or []
+        if warnings:
+            results["Discrepancies"].extend(warnings)
+        if shop_no is None or not name:
+            results["Discrepancies"].append(
+                "Tenant name and shop number must be verified before matching the master workbook.")
+            return results
+        matches = self.df_tenants.loc[
+            pd.to_numeric(self.df_tenants["Shop #"], errors="coerce").eq(shop_no)
+            & self.df_tenants["Tenant Name"].fillna("").astype(str).str.strip().str.casefold().eq(
+                str(name).strip().casefold())
+        ]
+        if len(matches) != 1:
+            results["Discrepancies"].append(
+                "No unique tenancy matched both the extracted tenant name and shop number.")
+            return results
+        entry = matches.iloc[0]
+        results["Match Found"] = True
+        results["Master Tenant Name"] = str(entry["Tenant Name"])
+        results["Manual Status"] = str(entry.get(
+            "Tenancy Record Status", entry.get("Manual_Lease_Status", "Unverified")))
+        extracted_rate = extracted_lease.get("Monthly Rent (KSh)")
+        if extracted_rate is None:
+            results["Discrepancies"].append("Monthly rent was not extracted; manual verification required.")
         else:
-            verification_results["Discrepancies"].append(f"New Unit / Shop #{shop_no} not found in master spreadsheet.")
-            
-        return verification_results
+            master_rate = pd.to_numeric(pd.Series([entry.get("Monthly Rate")]), errors="coerce").iloc[0]
+            if pd.isna(master_rate):
+                results["Discrepancies"].append("Master workbook monthly rent is missing.")
+            elif abs(float(extracted_rate) - float(master_rate)) > 1:
+                results["Discrepancies"].append(
+                    f"Rent mismatch: PDF KSh {float(extracted_rate):,.2f}; master KSh {float(master_rate):,.2f}.")
+        return results
 
     def map_transaction_to_shop(self, details_str: str, ref_str: str = "", customer_name: str = "") -> int:
         clean_ref = str(ref_str).strip()
@@ -493,7 +608,121 @@ class TenantPortalBackend:
         elif 'MART' in combined_text or 'CELE' in combined_text: return 22
         return 0
 
+    def tenancy_turnover_report(self, period_start=None, period_end=None):
+        """Excel-only tenancy register and cautious bank credit identification."""
+        from tenancy_turnover_v1 import tenancy_register, classify_credits
+        start = period_start or self.statement_start_date
+        end = period_end or self.statement_end_date
+        if start is None or end is None:
+            raise ValueError("Bank statement reporting dates are unavailable")
+        register = tenancy_register(self.df_tenants, start, end)
+        # Reattach per-row bank identity and legacy decisions, without deleting movements.
+        review_bank = self.df_bank_unfiltered.copy()
+        if "Customers Name" in self.df_bank.columns:
+            linked = self.df_bank[["Bank_Row_ID", "Customers Name"]].drop_duplicates("Bank_Row_ID")
+            review_bank = review_bank.merge(linked, on="Bank_Row_ID", how="left")
+        # Validate credits against reversal rows using the existing bank parser.
+        validity = self.df_bank[["Bank_Row_ID", "Valid_Credit"]].drop_duplicates("Bank_Row_ID")
+        review_bank = review_bank.merge(validity, on="Bank_Row_ID", how="left")
+        review_bank["Valid_Credit"] = review_bank["Valid_Credit"].fillna(True)
+        return classify_credits(
+            review_bank, register, self.map_transaction_to_shop, start, end,
+            reviews=self.tenancy_reviews, old_overrides=self.overrides,
+            old_ignored=self.ignored_refs, splits=self.receipt_splits
+        )
+
+    def save_receipt_split(self, bank_row_id, tenancy_id, components, evidence):
+        """Allocate one exact bank row without booking deposits as rent."""
+        from receipt_split_v1 import create_receipt_split, save_splits
+        from tenancy_turnover_v1 import tenancy_register
+        from bank_review_v1 import append_review_event
+        import getpass
+        if bank_row_id not in set(self.df_bank_unfiltered["Bank_Row_ID"]):
+            raise ValueError("Bank row not present in the uploaded statement")
+        row = self.df_bank_unfiltered.loc[
+            self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+        register = tenancy_register(
+            self.df_tenants, self.statement_start_date, self.statement_end_date)
+        selected = register.loc[register["Tenancy_ID"] == str(tenancy_id)]
+        if selected.empty:
+            raise ValueError("Individual tenancy was not found")
+        previous = self.tenancy_reviews.get(bank_row_id, {})
+        if previous.get("decision") in {"assign", "exclude"}:
+            raise ValueError("A previously approved assignment/exclusion must first be reviewed")
+        reference = str(row["Ref_Clean"]).strip()
+        if reference in self.ignored_refs and previous.get("decision") != "restore":
+            raise ValueError("Restore this excluded bank row before splitting")
+        if any(x in str(row["Transaction Details"]).upper() for x in
+               ["ONLINE.AC.CLOSURE", "TESTING MPESA", "DIRECTOR DEPOSIT"]):
+            raise ValueError("Automatic non-rent exclusion must be reviewed before splitting")
+        valid = self.df_bank.loc[self.df_bank["Bank_Row_ID"] == bank_row_id]
+        if valid.empty or not bool(valid.iloc[0]["Valid_Credit"]):
+            raise ValueError("Excluded or reversed credit cannot be split")
+        updated = create_receipt_split(
+            self.receipt_splits, bank_row_id, tenancy_id, row, selected.iloc[0],
+            components, evidence, getpass.getuser())
+        append_review_event(
+            self.tenancy_event_history_path, bank_row_id=bank_row_id,
+            reference=reference, action="split_receipt", reason=evidence,
+            previous=previous.get("decision", "unreviewed"), actor=getpass.getuser())
+        save_splits(self.receipt_split_path, updated)
+        self.receipt_splits = updated
+
+    def save_tenancy_bank_review(self, bank_row_id, decision, tenancy_id=None, reason=""):
+        from bank_review_v1 import write_review, record_decision
+        if bank_row_id in self.receipt_splits:
+            raise ValueError("This bank transaction already has a verified receipt split; it cannot also be reviewed as a full rent payment")
+        if bank_row_id not in set(self.df_bank_unfiltered["Bank_Row_ID"]):
+            raise ValueError("The selected transaction is not in the uploaded bank statement")
+        if decision == "assign":
+            from tenancy_turnover_v1 import tenancy_register
+            register = tenancy_register(self.df_tenants, self.statement_start_date, self.statement_end_date)
+            selected = register[register["Tenancy_ID"] == str(tenancy_id)]
+            if selected.empty or bool(selected.iloc[0]["Review_Required"]) or selected.iloc[0]["Tenancy_Status"] == "vacancy":
+                raise ValueError("Choose a valid individual tenancy, not a vacant or unverified record")
+        if decision == "assign":
+            from tenancy_turnover_v1 import _tx_date
+            movement = self.df_bank_unfiltered[self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+            move_date = _tx_date(movement["Transaction Date"])
+            start = selected.iloc[0]["Lease_Date_Parsed"]
+            end = selected.iloc[0]["End_Actual"]
+            if float(movement.get("Money In Num", 0)) <= 0 or pd.isna(move_date):
+                raise ValueError("Only dated incoming credits can be assigned to rent")
+            if pd.isna(start) or move_date < start:
+                raise ValueError("The payment predates this tenancy; do not assign it as rent")
+            if pd.notna(end) and move_date > end and "POST-TENANCY" not in reason.upper():
+                raise ValueError("For a payment after departure, include POST-TENANCY in the evidence note if it settles this former tenant's arrears")
+        if decision == "restore" and not reason.strip():
+            raise ValueError("Explain why this exclusion should be restored")
+        row = self.df_bank_unfiltered.loc[
+            self.df_bank_unfiltered["Bank_Row_ID"] == bank_row_id].iloc[0]
+        reference = str(row["Ref_Clean"]).strip()
+        previous = self.tenancy_reviews.get(bank_row_id, {}).get("decision", "")
+        if decision == "restore" and previous != "exclude" and reference not in self.ignored_refs:
+            raise ValueError("This selected bank row has no recorded exclusion")
+        updated = record_decision(self.tenancy_reviews, bank_row_id, decision, tenancy_id, reason)
+        if updated == self.tenancy_reviews:
+            return False  # An unchanged decision must not produce duplicate history.
+        from bank_review_v1 import append_review_event
+        import getpass
+        append_review_event(
+            self.tenancy_event_history_path, bank_row_id=bank_row_id,
+            reference=reference, action=decision, reason=reason,
+            previous=previous or ("legacy reference exclusion" if reference in self.ignored_refs else "unreviewed"),
+            actor=getpass.getuser(),
+        )
+        write_review(self.tenancy_review_path, updated)
+        self.tenancy_reviews = updated
+        return True
+
     def calculate_tenant_arrears(self, current_day: int = None) -> pd.DataFrame:
+        # Historical tenancy workbooks must not be billed using the legacy
+        # shop-level 12-month assumption or cross-tenant bank allocations.
+        if {'Tenancy Record Status', 'Lease End Date'}.issubset(self.df_tenants.columns):
+            register, pending = self.tenancy_turnover_report()
+            self.turnover_pending_credits = pending
+            return register
+
         if current_day is None:
             current_day = self.statement_day
 
