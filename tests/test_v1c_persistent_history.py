@@ -19,7 +19,7 @@ class PersistentHistoryTests(unittest.TestCase):
         other = dict(row, description="M-Pesa Rent")
         rerun = plan_statement_import("KCB-account", [other],
                                      {plan["new"][0]["fingerprint"]})
-        self.assertEqual(len(rerun["already_seen"]), 1)
+        self.assertEqual(len(rerun["possible_overlap"]), 1)
         self.assertEqual(len(rerun["new"]), 0)
 
     def test_identical_rows_in_single_file_need_review(self):
