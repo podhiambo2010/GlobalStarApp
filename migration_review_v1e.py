@@ -43,3 +43,59 @@ def collision_summary(rows):
         "collision_groups": len({r["collision_group"] for r in rows}),
         "ready_for_import": len(rows) == 0,
     }
+
+
+def cheque_return_candidates(plan):
+    """Find offsetting cheque credit/debit pairs without changing bank records.
+
+    Same-day equal/opposite cheques are candidates only. A subsequent credit
+    with matching cheque details is a possible re-bank, NOT proved by the
+    earlier offset and never approved as rent here.
+    """
+    from collections import defaultdict
+    from decimal import Decimal
+
+    if plan.get("mode") != "DRY_RUN_ONLY_NO_DB_WRITES":
+        raise ValueError("Cheque review requires a Stage 1D dry-run plan")
+
+    groups = defaultdict(lambda: {"credit": [], "debit": []})
+    rows = plan.get("bank_movements", [])
+    for source_row, row in enumerate(rows, 1):
+        amount = Decimal(str(row["amount"]))
+        if amount == 0:
+            continue
+        direction = "credit" if amount > 0 else "debit"
+        description = " ".join(str(row.get("description", "")).lower().split())
+        if not any(x in description for x in ("chq", "cheque", "check")):
+            continue
+        # A reversal must share cheque evidence, not just amount/date.
+        reference = str(row.get("reference", "")).strip().lower()
+        import re
+        cheque = re.search(r"\\b(?:chq|cheque|check)\\s*(?:no\\.?\\s*)?0*(\\d{3,})\\b",
+                           description)
+        if not cheque:
+            continue
+        key = (row["transaction_date"], abs(amount), reference,
+               cheque.group(1))
+        groups[key][direction].append((source_row, row))
+
+    candidates = []
+    for key, sides in sorted(groups.items(), key=lambda item: str(item[0])):
+        # When there is more than one of either side, do not guess pairing.
+        if len(sides["credit"]) != 1 or len(sides["debit"]) != 1:
+            continue
+        credit_pos, credit = sides["credit"][0]
+        debit_pos, debit = sides["debit"][0]
+        candidates.append({
+            "cheque_number": key[3],
+            "transaction_date": key[0],
+            "amount_ksh": str(key[1]),
+            "bank_reference": key[2],
+            "credit_row_id": credit.get("legacy_bank_row_id", ""),
+            "debit_row_id": debit.get("legacy_bank_row_id", ""),
+            "credit_source_row": credit_pos,
+            "debit_source_row": debit_pos,
+            "net_amount_ksh": "0.00",
+            "review_status": "PROPOSED_RETURN_PAIR — verify against bank",
+        })
+    return candidates
