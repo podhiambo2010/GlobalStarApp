@@ -805,6 +805,43 @@ elif module == "Arrears Payment Reminders":
                         "rent and is NOT yet synchronized. Overlapping or "
                         "identical bank movements must be resolved first."
                     )
+                from migration_review_v1e import (
+                    ambiguous_bank_rows, collision_summary
+                )
+                collision_rows = ambiguous_bank_rows(plan)
+                with st.expander(
+                    f"Stage 1E — Inspect identical-looking bank movements "
+                    f"({len(collision_rows)} rows)",
+                    expanded=bool(collision_rows),
+                ):
+                    st.caption(
+                        "The original bank statement may contain multiple genuine "
+                        "credits with identical date, amount, narration and "
+                        "reference. Do not discard or merge a row on those fields "
+                        "alone. Compare original line positions, running balances, "
+                        "and any bank-issued unique identifiers before deciding."
+                    )
+                    st.json(collision_summary(collision_rows))
+                    if collision_rows:
+                        st.dataframe(
+                            pd.DataFrame(collision_rows),
+                            width="stretch",
+                            hide_index=True,
+                        )
+                        st.download_button(
+                            "Download ambiguous rows for private investigation (CSV)",
+                            pd.DataFrame(collision_rows).to_csv(index=False),
+                            file_name="GSIL_ambiguous_bank_rows_PRIVATE.csv",
+                            mime="text/csv",
+                            key="v1e_collision_download",
+                        )
+                        st.warning(
+                            "Import remains blocked for these rows. This view "
+                            "does not update the bank statement, previous "
+                            "decisions, or Supabase."
+                        )
+                    else:
+                        st.success("No identical-looking movements in this run.")
                 st.dataframe(
                     pd.DataFrame(plan["evidence_inventory"]),
                     width="stretch", hide_index=True
