@@ -14,6 +14,7 @@ import pandas as pd
 
 from migration_identity_recovery_v1_section03c import _read_history
 from migration_classification_v1_section03a import _read_reviews
+from migration_preview_v1_section03 import _load_history, CHEQUE_CLEARANCES, CHEQUE_ALLOCATIONS
 
 
 def build_human_review_sheet(discrepancy, frame, root="."):
@@ -40,6 +41,41 @@ def build_human_review_sheet(discrepancy, frame, root="."):
         row_id = str(event.get("bank_row_id", "")).strip()
         if row_id:
             by_id[row_id].append(event)
+    # Signed-off cheque clearances and rent allocations are already independently
+    # reviewed. Display their status instead of reopening settled cases.
+    clearances = _load_history(root, CHEQUE_CLEARANCES)
+    allocations = _load_history(root, CHEQUE_ALLOCATIONS)
+    if clearances is None or allocations is None:
+        raise ValueError("Existing cheque audit files are missing; no financial cases were altered")
+    latest_cheques = {str(e["original_credit_row_id"]): e for e in clearances}
+    latest_allocations = {str(e["successful_credit_row_id"]): e for e in allocations}
+    cheque_receipts = []
+    role_by_row = {}
+    for event in latest_cheques.values():
+        cleared_id = str(event["successful_credit_row_id"])
+        allocation = latest_allocations.get(cleared_id)
+        if event.get("status") != "bank_cleared_pending_allocation" or allocation is None:
+            continue
+        if (str(allocation.get("cheque_number")) != str(event.get("cheque_number"))
+                or allocation.get("rent_posted") is not False):
+            raise ValueError("Cheque evidence conflicts; manual audit required")
+        cheque_receipts.append({
+            "cheque_number": str(event.get("cheque_number", "")),
+            "tenant": str(event.get("tenant_name", "")),
+            "amount_ksh": str(event.get("amount_ksh", "")),
+            "successful_bank_date": str(event.get("successful_credit_date", "")),
+            "successful_bank_reference": str(event.get("successful_credit_reference", "")),
+            "clearance_status": "bank_cleared",
+            "allocation_status": "approved_ledger_pending",
+            "rent_posted": False,
+        })
+        for key, role in (("original_credit_row_id", "returned_deposit"),
+                          ("returned_debit_row_id", "reversal"),
+                          ("successful_credit_row_id", "successful_credit")):
+            rid = str(event[key])
+            if rid in role_by_row and role_by_row[rid] != role:
+                raise ValueError("Conflicting cheque row roles")
+            role_by_row[rid] = role
     cases = []
     candidate_rows = []
     for i, item in enumerate(unmatched, 1):
@@ -51,6 +87,7 @@ def build_human_review_sheet(discrepancy, frame, root="."):
         candidates = rows[rows["Ref_Clean"].astype(str).str.strip().isin(refs)] if refs else rows.iloc[0:0]
         cases.append({
             "case": i,
+            "verified_cheque_row_role": role_by_row.get(old_id, "not_linked_by_exact_row_id"),
             "previous_decision": str(item.get("review_decision", "")),
             "previous_tenancy_id": str(item.get("review_tenancy_id") or ""),
             "bank_references_from_audit": " | ".join(refs),
@@ -85,6 +122,7 @@ def build_human_review_sheet(discrepancy, frame, root="."):
     return {
         "mode": "HUMAN_READABLE_HISTORICAL_REVIEW_NO_WRITES",
         "cases": cases,
+        "previously_approved_cheque_receipts": cheque_receipts,
         "reference_candidates": candidate_rows,
         "full_current_statement": statement,
         "original_statement_rows": len(statement),
