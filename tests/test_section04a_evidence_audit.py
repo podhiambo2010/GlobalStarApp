@@ -24,10 +24,14 @@ class EvidenceInventoryTests(unittest.TestCase):
             "r2": {"decision": "assign", "tenancy_id": "u2"},
             "r3": {"decision": "pending"},
         })
+        self.write(self.root, "tenancy_receipt_splits_v1.json", {
+            "split-row": {"tenancy_id": "t1", "components": [{"kind": "security_deposit", "amount_cents": 50000}]}
+        })
         self.write(self.root, "tenancy_bank_review_history_v1.json", [
             {"bank_row_id": "r1", "action": "assign"},
             {"bank_row_id": "r2", "action": "exclude"},
             {"bank_row_id": "legacy", "action": "exclude"},
+            {"bank_row_id": "split-row", "action": "split_receipt"},
         ])
         self.write(self.root, "cheque_clearance_reviews_v1h.json", {
             "schema_version": 1,
@@ -54,9 +58,19 @@ class EvidenceInventoryTests(unittest.TestCase):
         self.assertEqual(r["only_in_archive"], ["r3"])
         self.assertEqual(r["audit_ids_not_in_live_register"], ["legacy"])
         self.assertEqual(r["cheque_clearance_history_events"], 2)
+        self.assertEqual(r["receipt_split_records"], 1)
+        self.assertEqual(r["split_receipt_audit_ids_verified_in_split_register"], 1)
+        self.assertEqual(r["split_receipt_audit_ids_missing_split_register"], [])
+        self.assertEqual(r["audit_ids_not_in_live_register"], ["legacy"])
         self.assertEqual(r["latest_cheques"], 1)
         self.assertEqual(r["latest_unposted_allocation_count"], 1)
         self.assertFalse(r["migration_authorized"])
+        self.assertEqual(r["status"], "REQUIRES_MANUAL_RECONCILIATION")
+
+    def test_missing_split_record_blocks_migration(self):
+        self.write(self.root, "tenancy_receipt_splits_v1.json", {})
+        r = summarize(self.root, self.backup)
+        self.assertEqual(r["split_receipt_audit_ids_missing_split_register"], ["split-row"])
         self.assertEqual(r["status"], "REQUIRES_MANUAL_RECONCILIATION")
 
     def test_source_files_not_modified(self):
