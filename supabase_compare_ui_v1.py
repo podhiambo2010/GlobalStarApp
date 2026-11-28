@@ -7,6 +7,19 @@ import streamlit as st
 from supabase_compare_v1_readonly import compare_summary, read_remote_state
 
 
+def _configured_readonly_dsn():
+    """Use a temporary environment override or private local Streamlit secrets."""
+    temporary = os.environ.get("GS_V1_READONLY_DSN", "").strip()
+    if temporary:
+        return temporary
+    try:
+        return str(st.secrets.get("GS_V1_READONLY_DSN", "")).strip()
+    except (FileNotFoundError, KeyError):
+        return ""
+    except st.errors.StreamlitSecretNotFoundError:
+        return ""
+
+
 def render_section_02(plan):
     with st.expander("Section 02 — Compare with Supabase (read-only)", expanded=False):
         st.caption(
@@ -17,15 +30,17 @@ def render_section_02(plan):
         if not plan:
             st.warning("A valid Stage 1D dry-run manifest must be prepared before comparison.")
             return
-        if not os.environ.get("GS_V1_READONLY_DSN"):
+        dsn = _configured_readonly_dsn()
+        if not dsn:
             st.info(
-                "Read-only connection not configured. Set GS_V1_READONLY_DSN "
-                "privately on your computer; do not paste credentials in chat or GitHub."
+                "Read-only connection not configured. Run the one-time local setup "
+                "(python setup_gs_v1_connection.py) to create the private "
+                ".streamlit/secrets.toml file. Never share credentials in chat or GitHub."
             )
             return
         if st.button("Run Section 02 read-only comparison", key="v1_section02_compare"):
             try:
-                counts, fingerprints = read_remote_state()
+                counts, fingerprints = read_remote_state(dsn=dsn)
                 result = compare_summary(plan, counts, fingerprints)
                 st.session_state["v1_section02_comparison"] = result
             except (ValueError, RuntimeError, PermissionError, OSError, ImportError) as exc:
