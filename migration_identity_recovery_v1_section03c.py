@@ -117,3 +117,31 @@ def inspect_historical_identity(discrepancy, full_source, root=".", historical_b
         "local_writes": False,
         "supabase_writes": False,
     }
+
+
+def historical_tenancy_context(plan, full_source):
+    """Display exact historical/current identities without equating occupancies."""
+    if plan.get("schema") != "gs_streamlit_v1" or plan.get("mode") != "DRY_RUN_ONLY_NO_DB_WRITES":
+        raise ValueError("Expected read-only tenancy inventory")
+    if full_source.get("mode") != "SECTION_03B_FULL_SOURCE_DIAGNOSTIC_NO_WRITES":
+        raise ValueError("Expected current full-statement diagnostic")
+    context = []
+    for item in full_source.get("stale_tenancy_evidence", []):
+        historical_id = str(item["historical_tenancy_id"])
+        prefix = historical_id.split(":", 1)[0]
+        possible = [t for t in plan.get("tenancies", [])
+                    if str(t.get("unit_code", "")).strip() == prefix]
+        context.append({
+            "bank_row_id": str(item["bank_row_id"]),
+            "historical_tenancy_id": historical_id,
+            "unit_code_historical": prefix,
+            "current_tenancy_candidates_same_unit": [
+                {"tenancy_id": str(t.get("tenancy_id", "")),
+                 "tenant_name": str(t.get("tenant_name", "")),
+                 "tenancy_status": str(t.get("tenancy_status", ""))}
+                for t in possible],
+            "evidence_required": "Verify dated lease/occupancy records before linking an earlier identity",
+            "historical_tenancy_confirmed": False,
+            "current_tenant_reassigned": False,
+        })
+    return context
