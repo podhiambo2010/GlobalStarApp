@@ -17,6 +17,7 @@ from pathlib import Path
 FILES = {
     "live_reviews": "tenancy_bank_reviews_v1.json",
     "audit_history": "tenancy_bank_review_history_v1.json",
+    "receipt_splits": "tenancy_receipt_splits_v1.json",
     "clearances": "cheque_clearance_reviews_v1h.json",
     "allocations": "cheque_allocations_v1i.json",
     "ignored": "ignored_transactions.json",
@@ -46,6 +47,9 @@ def summarize(root: Path, backup: Path):
                                                  optional=key in {"ignored", "reassignments"})
     exported, integrity["archived_reviews"] = read_json(backup / BACKUP_REVIEWS)
     reviews, events = original["live_reviews"], original["audit_history"]
+    splits = original["receipt_splits"]
+    if not isinstance(splits, dict) or any(not isinstance(v, dict) for v in splits.values()):
+        raise ValueError("Receipt split register is missing or malformed; do not lose split decisions")
     if not isinstance(reviews, dict) or not isinstance(exported, dict):
         raise ValueError("Live and archived reviews must be JSON objects")
     if not isinstance(events, list) or any(not isinstance(e, dict) for e in events):
@@ -61,6 +65,8 @@ def summarize(root: Path, backup: Path):
     conflicts = [rowid for rowid in sorted(live_ids & archive_ids)
                  if reviews[rowid] != exported[rowid]]
     orphaned_audit_ids = set()
+    missing_split_ids = set()
+    audited_split_ids = set()
     audit_counts = Counter()
     audit_ids = set()
     for event in events:
@@ -69,7 +75,11 @@ def summarize(root: Path, backup: Path):
         rowid = str(event.get("bank_row_id", ""))
         if rowid:
             audit_ids.add(rowid)
-            if rowid not in live_ids:
+            if action == "split_receipt":
+                audited_split_ids.add(rowid)
+                if rowid not in splits:
+                    missing_split_ids.add(rowid)
+            elif rowid not in live_ids:
                 orphaned_audit_ids.add(rowid)
     cheque_hist = original["clearances"]["history"]
     allocation_hist = original["allocations"]["history"]
@@ -85,7 +95,7 @@ def summarize(root: Path, backup: Path):
         latest_allocation[str(e["successful_credit_row_id"])] = e
     unposted = [e for e in latest_allocation.values() if e.get("rent_posted") is False]
     unexpected_postings = [e for e in latest_allocation.values() if e.get("rent_posted") is not False]
-    status = "REQUIRES_MANUAL_RECONCILIATION" if conflicts or orphaned_audit_ids or unexpected_postings or (live_ids != archive_ids) else "EVIDENCE_INVENTORIED_NOT_AUTHORIZED_FOR_MIGRATION"
+    status = "REQUIRES_MANUAL_RECONCILIATION" if conflicts or orphaned_audit_ids or missing_split_ids or unexpected_postings or (live_ids != archive_ids) else "EVIDENCE_INVENTORIED_NOT_AUTHORIZED_FOR_MIGRATION"
     return {
         "mode": "SECTION_04A_READ_ONLY_EVIDENCE_INVENTORY",
         "migration_authorized": False,
@@ -102,6 +112,11 @@ def summarize(root: Path, backup: Path):
         "only_in_archive": sorted(archive_ids - live_ids),
         "content_conflicts_for_shared_ids": conflicts,
         "audit_events": len(events),
+        "receipt_split_records": len(splits),
+        "split_receipt_audit_ids": len(audited_split_ids),
+        "split_receipt_audit_ids_verified_in_split_register": len(audited_split_ids - missing_split_ids),
+        "split_receipt_audit_ids_missing_split_register": sorted(missing_split_ids),
+        "split_register_ids_without_split_audit": sorted(set(splits) - audited_split_ids),
         "audit_actions": dict(sorted(audit_counts.items())),
         "audit_ids_not_in_live_register": sorted(orphaned_audit_ids),
         "live_review_ids_without_audit_event": sorted(live_ids - audit_ids),
@@ -112,6 +127,7 @@ def summarize(root: Path, backup: Path):
         "unexpected_allocation_posting_status_count": len(unexpected_postings),
         "notes": [
             "Historical references cannot automatically override individual bank-row reviews.",
+            "split_receipt audit actions are validated against the dedicated split register, not ordinary individual bank reviews.",
             "Audit omissions or differing archive records are not automatically lost or duplicated payments.",
             "Append-only cheque amendments must be preserved in chronological history.",
             "Inspect unresolved differences before a separate authorized write migration.",
@@ -132,11 +148,12 @@ def main(argv=None):
         return 1
     print("Section 04A local evidence inventory — NO database writes")
     for key in ("status", "live_decisions", "archived_decisions", "ids_in_both",
-                "audit_events", "cheque_clearance_history_events",
+                "audit_events", "receipt_split_records", "split_receipt_audit_ids",
+                "split_receipt_audit_ids_verified_in_split_register", "cheque_clearance_history_events",
                 "cheque_allocation_history_events", "latest_unposted_allocation_count"):
         print(f"{key}: {result[key]}")
     for key in ("only_in_live", "only_in_archive", "content_conflicts_for_shared_ids",
-                "audit_ids_not_in_live_register"):
+                "audit_ids_not_in_live_register", "split_receipt_audit_ids_missing_split_register"):
         print(f"{key}: {len(result[key])}")
     if args.output:
         try:
