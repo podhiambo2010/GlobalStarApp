@@ -31,6 +31,19 @@ def render_section_03d(original_bank_frame):
         if not evidence:
             st.info("Click the button above to display the transaction evidence in familiar bank-statement columns.")
             return
+        receipts = evidence.get("previously_approved_cheque_receipts", [])
+        if receipts:
+            st.success(
+                f"{len(receipts)} previously reviewed returned cheques are already bank-cleared "
+                "with approved rent allocations. They are NOT new unresolved review cases. "
+                "Ledger posting remains pending."
+            )
+            st.dataframe(pd.DataFrame(receipts), hide_index=True, width="stretch")
+        st.caption(
+            "Prior review label 'reversal' alone does not establish that a row is "
+            "one of the two cheques. Cheque membership is verified only using "
+            "the already approved original bank-row identities."
+        )
         cases = evidence["cases"]
         st.metric("Historical cases requiring human investigation", len(cases))
         labels = [f"Case {case['case']}: {case['previous_decision']} · "
