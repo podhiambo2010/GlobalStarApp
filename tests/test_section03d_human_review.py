@@ -33,6 +33,25 @@ class HistoricalHumanReviewTests(unittest.TestCase):
         (self.root / "tenancy_bank_review_history_v1.json").write_text(
             json.dumps(history), encoding="utf-8"
         )
+        cheque = {"schema_version": 1, "history": [{
+            "cheque_number": "4525", "tenant_name": "Mash East Africa Limited",
+            "amount_ksh": "60000", "original_credit_row_id": "cheque-original",
+            "returned_debit_row_id": "cheque-reversal",
+            "successful_credit_row_id": "cheque-cleared",
+            "successful_credit_reference": "FT25315X5FFZ",
+            "successful_credit_date": "2025-11-11",
+            "status": "bank_cleared_pending_allocation"
+        }]}
+        allocation = {"schema_version": 1, "history": [{
+            "cheque_number": "4525", "successful_credit_row_id": "cheque-cleared",
+            "rent_posted": False
+        }]}
+        (self.root / "cheque_clearance_reviews_v1h.json").write_text(
+            json.dumps(cheque), encoding="utf-8"
+        )
+        (self.root / "cheque_allocations_v1i.json").write_text(
+            json.dumps(allocation), encoding="utf-8"
+        )
         self.discrepancy = {
             "mode": "SECTION_03B_DIAGNOSTIC_ONLY_NO_WRITES",
             "review_register_sha256": hashlib.sha256(
@@ -63,6 +82,12 @@ class HistoricalHumanReviewTests(unittest.TestCase):
         self.assertEqual(result["cases"][0]["bank_references_from_audit"], "FT-SHARED")
         self.assertIn("Payment from tenant", result["reference_candidates"][0]["full_particulars"])
         self.assertFalse(result["cases"][0]["original_transaction_date_proven"])
+        self.assertEqual(result["rent_postings"], 0)
+
+    def test_reviewed_cheque_is_not_reopened(self):
+        result = build_human_review_sheet(self.discrepancy, self.bank, self.root)
+        self.assertEqual(len(result["previously_approved_cheque_receipts"]), 1)
+        self.assertEqual(result["previously_approved_cheque_receipts"][0]["allocation_status"], "approved_ledger_pending")
         self.assertEqual(result["rent_postings"], 0)
 
     def test_no_current_reference_match_is_clear(self):
