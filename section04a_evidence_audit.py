@@ -85,7 +85,7 @@ def summarize(root: Path, backup: Path):
         latest_allocation[str(e["successful_credit_row_id"])] = e
     unposted = [e for e in latest_allocation.values() if e.get("rent_posted") is False]
     unexpected_postings = [e for e in latest_allocation.values() if e.get("rent_posted") is not False]
-    status = "REQUIRES_MANUAL_RECONCILIATION" if conflicts or orphaned_audit_ids or unexpected_postings else "EVIDENCE_INVENTORIED_NOT_AUTHORIZED_FOR_MIGRATION"
+    status = "REQUIRES_MANUAL_RECONCILIATION" if conflicts or orphaned_audit_ids or unexpected_postings or (live_ids != archive_ids) else "EVIDENCE_INVENTORIED_NOT_AUTHORIZED_FOR_MIGRATION"
     return {
         "mode": "SECTION_04A_READ_ONLY_EVIDENCE_INVENTORY",
         "migration_authorized": False,
