@@ -5,11 +5,11 @@ import json
 import pandas as pd
 import streamlit as st
 
-from migration_identity_recovery_v1_section03c import inspect_historical_identity
+from migration_identity_recovery_v1_section03c import inspect_historical_identity, historical_tenancy_context
 from historical_kcb_excel_v1_section03c import load_historical_kcb_xlsx
 
 
-def render_section_03c():
+def render_section_03c(plan):
     with st.expander("Section 03C — Historical statement identity recovery (NO WRITES)", expanded=False):
         st.caption(
             "Investigates 16 preserved historical decisions using the local bank-review audit "
@@ -62,6 +62,9 @@ def render_section_03c():
             "interpretation": report["interpretation"],
         })
         st.dataframe(report["review_records"], hide_index=True, width="stretch")
+        st.subheader("Separate historical tenancy identity investigation")
+        st.caption("Same-unit matches are search hints, not evidence of the earlier tenant.")
+        st.json(historical_tenancy_context(plan, full_source))
         st.download_button(
             "Download Section 03C diagnostic (NO WRITES)",
             json.dumps(report, ensure_ascii=False, indent=2),
