@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from migration_identity_recovery_v1_section03c import inspect_historical_identity
+from historical_kcb_excel_v1_section03c import load_historical_kcb_xlsx
 
 
 def render_section_03c():
@@ -20,25 +21,28 @@ def render_section_03c():
             st.info("Complete the Section 03B discrepancy report AND full-source check in this session.")
             return
         history_csv = st.file_uploader(
-            "Optional historical KCB statement (normalized CSV with Transaction Date, Value Date, "
-            "Transaction Details, Money In Num, Money Out Num, and Ref_Clean)",
-            type=["csv"], key="v1_section03c_historical_csv"
+            "Optional historical KCB statement — original Excel (.xlsx), or normalized CSV",
+            type=["xlsx", "csv"], key="v1_section03c_historical_csv"
         )
         st.caption(
-            "First run without an archive to inspect saved audit events. A historical file must "
-            "have the original normalized columns; do not change the current uploaded statement."
+            "First run without an archive to inspect saved audit events. Original KCB Excel "
+            "exports are read in memory and never change the currently uploaded statement."
         )
         if st.button("Investigate historical identities (read-only)", key="v1_section03c_run_button"):
             try:
                 archived_frame = None
                 if history_csv is not None:
-                    archived_frame = pd.read_csv(io.BytesIO(history_csv.getvalue()),
-                                                 dtype={"Ref_Clean": "string", "Bank Reference Number": "string"})
+                    if history_csv.name.lower().endswith(".xlsx"):
+                        archived_frame, source_sheet = load_historical_kcb_xlsx(history_csv.getvalue())
+                        st.caption(f"Historical Excel evidence read from sheet: {source_sheet}")
+                    else:
+                        archived_frame = pd.read_csv(io.BytesIO(history_csv.getvalue()),
+                                                     dtype={"Ref_Clean": "string", "Bank Reference Number": "string"})
                 report = inspect_historical_identity(discrepancy, full_source,
                                                      historical_bank=archived_frame)
                 st.session_state["v1_section03c_report"] = report
             except (ValueError, KeyError, TypeError, OSError, UnicodeError,
-                    json.JSONDecodeError, pd.errors.ParserError) as exc:
+                    json.JSONDecodeError, pd.errors.ParserError, ImportError) as exc:
                 st.session_state.pop("v1_section03c_report", None)
                 st.error(f"Identity inspection blocked: {exc}. No original decisions were altered.")
                 return
