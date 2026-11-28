@@ -1172,7 +1172,7 @@ elif module == "Arrears Payment Reminders":
         render_section_03b(migration_plan_for_clearance, backend.df_bank_unfiltered)
 
         from migration_identity_recovery_ui_v1_section03c import render_section_03c
-        render_section_03c()
+        render_section_03c(migration_plan_for_clearance)
 
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
