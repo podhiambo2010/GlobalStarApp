@@ -1174,6 +1174,9 @@ elif module == "Arrears Payment Reminders":
         from migration_identity_recovery_ui_v1_section03c import render_section_03c
         render_section_03c(migration_plan_for_clearance)
 
+        from historical_review_human_ui_v1 import render_section_03d
+        render_section_03d(backend.df_bank_unfiltered)
+
         with st.expander("Stage 1B — Opening balance evidence (separate audit register)"):
             st.caption(
                 "Enter an independently supported balance as at an exact date. "
